@@ -164,7 +164,7 @@
     const r = range(st.mode, st.anchor);
     return `<div class="pbar">
       <div class="seg">${modes.map((m) => `<button class="${st.mode === m ? 'on' : ''}" data-act="p-mode" data-k="${k}" data-v="${m}">${MODE_TH[m]}</button>`).join('')}</div>
-      <div class="nav"><button class="icon" data-act="p-prev" data-k="${k}" aria-label="ก่อนหน้า">${ICON.prev}</button><div class="plabel">${r.label}</div><button class="icon" data-act="p-next" data-k="${k}" aria-label="ถัดไป">${ICON.next}</button>${o.noToday ? '' : `<button class="btn sm ghost" data-act="p-today" data-k="${k}">วันนี้</button>`}</div>
+      <div class="nav"><button class="icon" data-act="p-prev" data-k="${k}" aria-label="ก่อนหน้า">${ICON.prev}</button><button class="plabel" data-act="p-pick" data-k="${k}" aria-label="เลือกวันที่">${r.label} <span class="caret">▾</span></button><button class="icon" data-act="p-next" data-k="${k}" aria-label="ถัดไป">${ICON.next}</button>${o.noToday ? '' : `<button class="btn sm ghost" data-act="p-today" data-k="${k}">วันนี้</button>`}</div>
     </div>`;
   }
   const stOf = (k) => (k === 'shop' ? state.shopUI : state[k]);
@@ -214,6 +214,21 @@
       ${sorted.length ? sorted.slice(0, 12).map((t) => txRow(t, true)).join('') + (sorted.length > 12 ? `<div class="sidehint">และอีก ${sorted.length - 12} รายการ</div>` : '') : '<div class="sidehint">ไม่มีรายการ</div>'}`;
   }
 
+  function localBanner() {
+    if (!DB.live) return '';
+    const c = DB.localCounts(), n = c.tx + c.shop + c.moves;
+    return n > 0 ? `<div class="demopill" style="display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap"><span>พบข้อมูลที่จดไว้ในเครื่องนี้ ${n} รายการ ที่ยังไม่ได้ขึ้น Supabase</span><button class="btn sm primary" data-act="import-local">ย้ายขึ้น Supabase</button></div>` : '';
+  }
+  async function importLocal(btn) {
+    btn.disabled = true;
+    try {
+      const r = await DB.importLocal();
+      const d = await DB.loadAll();
+      state.tx = d.tx; state.shopDays = d.shop; state.moves = d.moves || [];
+      toast(`ย้ายขึ้น Supabase แล้ว ${r.tx + r.shop + r.moves} รายการ ✓`); render(true);
+    } catch (e) { toast('ย้ายไม่สำเร็จ: ' + (e.message || e), true); btn.disabled = false; }
+  }
+
   function viewDash(v) {
     const d = state.dash, r = range(d.mode, d.anchor);
     const base = personFilter(state.tx, d.person);
@@ -223,7 +238,6 @@
     const inc0 = bks.map(() => 0), exp0 = bks.map(() => 0);
     const idx = new Map(bks.map((b, i) => [b.key, i]));
     base.forEach((t) => { const i = idx.get(keyOf(d.mode, t.date)); if (i != null) (t.type === 'income' ? inc0 : exp0)[i] += t.amount; });
-    if (state.sel.dash === undefined) state.sel.dash = defaultSel(bks, bks.map((_, i) => inc0[i] + exp0[i]));
 
     let avgLabel = '', n = 0;
     const now = today();
@@ -296,6 +310,7 @@
       ${[0, 1, 2].map((i) => `<div class="lrow"><div class="nm"><i class="sw" style="background:var(--pot${i})"></i><span>${esc(cfg.names[i])}</span></div><div class="num ${ps[i].bal < 0 ? 'exp' : ''}">${money(ps[i].bal)}<span class="pc">${potTotal > 0 ? pct(Math.max(0, ps[i].bal), potTotal) + '%' : ''}</span></div><div class="bar"><i style="width:${potTotal > 0 ? pct(Math.max(0, ps[i].bal), potTotal) : 0}%;background:var(--pot${i})"></i></div></div>`).join('')}</div>` : '';
 
     v.innerHTML = `
+      ${localBanner()}
       ${periodBar('dash', d)}
       <div class="filters">${personSelect('dashPerson', d.person, 'data-change="dash-person"')}</div>
       <div class="kpis">
@@ -307,7 +322,7 @@
       <div class="card"><h2>ประวัติรายรับรายจ่าย</h2><p class="lead">${d.mode === 'day' ? '7 วันล่าสุด' : d.mode === 'year' ? 'รายเดือน' : 'รายวัน'} · แตะแท่งกราฟเพื่อดูรายละเอียด</p>
         <div class="chartgrid"><div class="cg-chart">${chart}
           <div class="legend"><span><i style="background:var(--expense)"></i>รายจ่าย</span><span><i style="background:var(--income)"></i>รายรับ</span></div></div>
-          <aside class="cg-side" id="side-dash">${dashPanel(state.sel.dash)}</aside></div>
+          <aside class="cg-side ${state.sel.dash >= 0 ? '' : 'idle'}" id="side-dash">${dashPanel(state.sel.dash)}</aside></div>
         ${n > 0 ? `<div class="avgs"><div><small>รายจ่ายเฉลี่ย${avgLabel}</small><b class="exp">${money(exp / n)}</b></div><div><small>รายรับเฉลี่ย${avgLabel}</small><b class="inc">${money(inc / n)}</b></div></div>` : ''}
       </div>
       <div class="grid2">
@@ -349,7 +364,8 @@
   }
   function rowHtml(r, i) {
     const opts = catsOf(r.type).map((c) => opt(c.name, c.emoji + ' ' + c.name, c.name === r.category)).join('');
-    return `<div class="prow" data-i="${i}">
+    const col = catInfo(r.category, r.type).color;
+    return `<div class="prow" data-i="${i}" style="--rc:${col}">
       <div class="top2"><div class="seg"><button class="${r.type === 'expense' ? 'on' : ''}" data-act="row-type" data-i="${i}" data-v="expense">รายจ่าย</button><button class="${r.type === 'income' ? 'on' : ''}" data-act="row-type" data-i="${i}" data-v="income">รายรับ</button></div>
         ${r.date !== state.add.date ? `<span class="tagdate">📅 ${fmtD(r.date)}</span>` : '<span></span>'}
         <button class="icon del" data-act="row-del" data-i="${i}" aria-label="เอาออก">${ICON.del}</button></div>
@@ -440,6 +456,32 @@
     document.body.appendChild(m);
   }
   function closeModal() { const m = $('#modal'); if (m) m.remove(); }
+
+  function openPicker(k) {
+    const st = stOf(k), d = fromISO(st.anchor), y = d.getFullYear(), m = d.getMonth();
+    const cy = new Date().getFullYear(), ys = [];
+    for (let i = Math.min(cy - 8, y); i <= Math.max(cy + 1, y); i++) ys.push(i);
+    const yearSel = (id) => `<select id="${id}">${ys.map((yy) => opt(yy, 'พ.ศ. ' + be(yy), yy === y)).join('')}</select>`;
+    let body, hint = '';
+    if (st.mode === 'day' || st.mode === 'week') {
+      body = `<label class="f">วันที่<input type="date" id="pkDate" value="${st.anchor}"></label>`;
+      if (st.mode === 'week') hint = '<p class="hint">เลือกวันไหนก็ได้ ระบบจะแสดงทั้งสัปดาห์ที่มีวันนั้น</p>';
+    } else if (st.mode === 'month') {
+      body = `<div class="fields"><label class="f">เดือน<select id="pkMonth">${MONTHS.map((n, i) => opt(i, n, i === m)).join('')}</select></label><label class="f">ปี${yearSel('pkYear')}</label></div>`;
+    } else body = `<label class="f">ปี${yearSel('pkYear')}</label>`;
+    openModal(`<h3>เลือก${MODE_TH[st.mode]}</h3>${body}${hint}
+      <div class="actions"><button class="btn" data-act="pk-today" data-k="${k}">วันนี้</button><button class="btn primary" data-act="pk-save" data-k="${k}">ตกลง</button></div>`);
+  }
+  function applyPicker(k) {
+    const st = stOf(k);
+    let a;
+    if (st.mode === 'day' || st.mode === 'week') a = ($('#pkDate') || {}).value;
+    else if (st.mode === 'month') a = `${$('#pkYear').value}-${pad(Number($('#pkMonth').value) + 1)}-01`;
+    else a = `${$('#pkYear').value}-01-01`;
+    if (!a) return toast('เลือกวันที่ก่อน', true);
+    st.anchor = a; state.sel = {}; if (k === 'list') state.list.open = new Set();
+    closeModal(); render(true);
+  }
 
   function editTx(id) {
     const t = state.tx.find((x) => x.id === id);
@@ -612,7 +654,6 @@
       { key: 'profit', name: 'กำไร', color: 'var(--income)', values: Pr },
     ];
     const act = active.filter((s) => u.series[s.key]);
-    if (state.sel.shop1 === undefined) state.sel.shop1 = defaultSel(bks, bks.map((_, i) => S[i] + Pr[i]));
     const chart1 = chartBlock('shop1', 'bars', { labels: bks.map((b) => b.label), minGroupW: gw, series: act.length ? act : active,
       tip: (i) => [bks[i].full, 'ขาย ' + money(S[i]), 'ต้นทุน ' + money(Co[i]), 'กำไร ' + money(Pr[i])] },
     (i) => `<b>${bks[i].full}</b><br>ขาย ${money(S[i])} · ต้นทุน ${money(Co[i])} · <span class="inc">กำไร ${money(Pr[i])}</span>`);
@@ -629,7 +670,6 @@
     const have = cap + ps[1].bal, need = avg30 * days, diff = have - need;
     const stockPeriod = sumBy(Pu, (x) => x);
     const salesPerBaht = stockPeriod > 0 ? sales / stockPeriod : 0;
-    if (state.sel.shop3 === undefined) state.sel.shop3 = defaultSel(bks, Pu);
     const chart3 = chartBlock('shop3', 'bars', { labels: bks.map((b) => b.label), minGroupW: gw, series: [{ name: 'ซื้อของเข้าร้าน', color: 'var(--pot1)', values: Pu }],
       tip: (i) => [bks[i].full, 'ซื้อของ ' + money(Pu[i]), 'ขายได้ ' + money(S[i])] },
     (i) => `<b>${bks[i].full}</b><br>ซื้อของเข้าร้าน ${money(Pu[i])} · ขายได้ ${money(S[i])}`);
@@ -747,7 +787,6 @@
     const order = [1, 2, 3, 4, 5, 6, 0];
     const wdAvg = order.map((w) => (wdCnt[w] ? wdSum[w] / wdCnt[w] : 0));
     const wdTop = wdAvg.indexOf(Math.max(...wdAvg));
-    if (state.sel.ana === undefined) state.sel.ana = Math.max(...wdAvg) > 0 ? wdTop : -1;
     const wChart = chartBlock('ana', 'bars', { labels: order.map((w) => WD_S[w]), minGroupW: 38, height: 180, series: [{ name: 'เฉลี่ย', color: 'var(--accent)', values: wdAvg }],
       tip: (i) => ['วัน' + WD[order[i]], 'เฉลี่ย ' + money(wdAvg[i])] }, (i) => `<b>วัน${WD[order[i]]}</b> ใช้เฉลี่ย ${money(wdAvg[i])} (รวม ${money(wdSum[order[i]])})`);
 
@@ -827,6 +866,7 @@
       <p class="hint">รายการ ${state.tx.length} · ยอดร้านข้าว ${state.shopDays.length} วัน · เงินเข้า/ออก ${state.moves.length} รายการ</p>`;
     const ec = catsOf('expense').length, ic = catsOf('income').length;
     v.innerHTML = `<div class="accs">
+      ${acc('greet', '👋', 'ข้อความต้อนรับ', 'แสดงใต้ชื่อแอพ', `<label class="f">ข้อความ (เว้นว่างได้ ถ้าไม่ต้องการ)<input id="greetIn" maxlength="60" value="${esc(state.settings.greeting == null ? 'ขอให้เป็นวันที่ดีนะ' : state.settings.greeting)}" data-change="greeting" placeholder="เช่น ขอให้เป็นวันที่ดี"></label><p class="hint">ตัวอย่างที่จะแสดง: ${greeting()}</p>`)}
       ${acc('theme', '🎨', 'ธีม', esc(cur.name), themeBody)}
       ${acc('people', '👨‍👩‍👧', 'คนในครอบครัว', `${(state.settings.people || []).length} คน`, peopleBody)}
       ${acc('catExp', '🔻', 'หมวดรายจ่าย', `${ec} หมวด`, `<p class="lead">แตะหมวดเพื่อแก้คำสำคัญ ระบบใช้คำเหล่านี้แยกหมวดตอนพิมพ์หลายรายการ</p>` + catBlock('expense'), 'exp-acc')}
@@ -853,9 +893,15 @@
   }
 
   /* ---------- วาดหน้า ---------- */
+  function greeting() {
+    const g = state.settings.greeting;
+    const msg = g == null ? 'ขอให้เป็นวันที่ดีนะ' : g;
+    return `สวัสดีวัน${WD[new Date().getDay()]}${msg ? ' · ' + esc(msg) : ''}`;
+  }
   function renderTabs() {
     $('#tabs').innerHTML = TABS.map(([id, label, svg]) => `<button class="${state.tab === id ? 'on' : ''}" data-act="tab" data-v="${id}"><svg viewBox="0 0 24 24">${svg}</svg><span>${label}</span></button>`).join('');
-    $('#status').innerHTML = DB.live ? '' : '<span class="dot warn"></span>โหมดทดลอง · เก็บในเครื่องนี้เท่านั้น';
+    $('#status').innerHTML = greeting();
+    $('#demo').innerHTML = DB.live ? '' : '<div class="demopill">⚠️ ยังไม่ได้เชื่อมต่อ Supabase · ข้อมูลอยู่ในเครื่องนี้เท่านั้น ไม่ขึ้นเครื่องอื่น</div>';
   }
   function render(keepScroll) {
     const y = window.scrollY;
@@ -865,37 +911,14 @@
     document.querySelectorAll('[data-chart]').forEach((box) => { box.scrollLeft = box.scrollWidth; });
     if (keepScroll) window.scrollTo(0, y); else window.scrollTo(0, 0);
   }
-  function go(tab) {
-    if (!TABS.some((x) => x[0] === tab)) tab = 'dash';
-    state.tab = tab;
-    try { history.replaceState(history.state, '', '#/' + tab); } catch (e) { /* ignore */ }
+  function route() {
+    const t = (location.hash || '').replace('#/', '');
+    state.tab = TABS.some((x) => x[0] === t) ? t : 'dash';
     render();
   }
-
-  /* ---------- ปุ่มย้อนกลับ: ไม่ย้อนตามขั้น ถามก่อนออก / กดซ้ำเพื่อออก ---------- */
-  function leaveApp(steps) {
-    const d = $('#exitdlg'); if (d) d.remove();
-    try { history.go(-steps); } catch (e) { /* ignore */ }
-    setTimeout(() => { try { window.close(); } catch (e) { /* ignore */ } }, 250);
-  }
-  function askExit() {
-    if ($('#exitdlg')) return;
-    const m = document.createElement('div');
-    m.className = 'modal-back'; m.id = 'exitdlg';
-    m.innerHTML = '<div class="modal small"><h3>ออกจากแอพหรือไม่?</h3><p class="lead">กดย้อนกลับอีกครั้งเพื่อออก หรือเลือกอยู่ต่อ</p><div class="actions"><button class="btn primary" data-act="exit-stay">อยู่ต่อ</button><button class="btn" data-act="exit-go">ออก</button></div></div>';
-    document.body.appendChild(m);
-  }
-  function setupBack() {
-    try {
-      history.replaceState({ g: 0 }, '', location.href);
-      history.pushState({ g: 1 }, '', '#/' + state.tab);
-    } catch (e) { return; }
-    window.addEventListener('popstate', () => {
-      if ($('#exitdlg')) { leaveApp(1); return; }              // กดย้อนกลับซ้ำ → ออก
-      history.pushState({ g: 1 }, '', '#/' + state.tab);       // อยู่ในแอพต่อ
-      if ($('#modal')) { closeModal(); return; }              // ปิดหน้าต่างก่อน
-      askExit();
-    });
+  function go(tab) {
+    if (!TABS.some((x) => x[0] === tab)) tab = 'dash';
+    if (location.hash === '#/' + tab) { state.tab = tab; render(); } else location.hash = '#/' + tab;
   }
 
   /* ---------- เหตุการณ์ ---------- */
@@ -907,7 +930,7 @@
       const sc = box.scrollLeft;
       box.innerHTML = drawChart(name); box.scrollLeft = sc;
       const rd = $('#read-' + name); if (rd) rd.innerHTML = readText(name);
-      if (cache[name].panel) { const sd = $('#side-' + name); if (sd) sd.innerHTML = cache[name].panel(state.sel[name]); }
+      if (cache[name].panel) { const sd = $('#side-' + name); if (sd) { sd.innerHTML = cache[name].panel(state.sel[name]); sd.classList.toggle('idle', !(state.sel[name] >= 0)); } }
       return;
     }
     const el = e.target.closest('[data-act]');
@@ -917,6 +940,9 @@
       case 'tab': go(v); break;
       case 'p-mode': { const st = stOf(k); st.mode = v; state.sel = {}; render(true); break; }
       case 'p-prev': case 'p-next': { const st = stOf(k); st.anchor = step(st.mode, st.anchor, act === 'p-next' ? 1 : -1); state.sel = {}; if (k === 'list') state.list.open = new Set(); render(true); break; }
+      case 'p-pick': openPicker(k); break;
+      case 'pk-save': applyPicker(k); break;
+      case 'pk-today': stOf(k).anchor = today(); state.sel = {}; closeModal(); render(true); break;
       case 'p-today': { stOf(k).anchor = today(); state.sel = {}; render(true); break; }
       case 'drill': state.dash.mode = el.dataset.m; state.dash.anchor = el.dataset.date; state.sel = {}; render(); break;
       case 'dash-cattype': state.dash.catType = v; render(true); break;
@@ -932,8 +958,6 @@
       case 'tx-del': delTx(el.dataset.id); break;
       case 'tx-save': saveTxEdit(el.dataset.id); break;
       case 'modal-close': closeModal(); break;
-      case 'exit-stay': { const d = $('#exitdlg'); if (d) d.remove(); break; }
-      case 'exit-go': leaveApp(2); break;
       case 'use-stock': state.shopUI.form.cost = String(num(v)); fillShopForm(); break;
       case 'shop-save': saveShop(el); break;
       case 'shop-ser': state.shopUI.series[v] = !state.shopUI.series[v]; if (!Object.values(state.shopUI.series).some(Boolean)) state.shopUI.series[v] = true; render(true); break;
@@ -993,6 +1017,7 @@
         if (confirm('คืนหมวดหมู่และคำสำคัญเป็นค่าเริ่มต้น ?')) { state.settings.categories = JSON.parse(JSON.stringify(P.DEFAULT_CATEGORIES)); saveSetting('categories'); render(true); }
         break;
       case 'export': exportCsv(v); break;
+      case 'import-local': importLocal(el); break;
       default: break;
     }
   });
@@ -1033,13 +1058,15 @@
     if (kind === 'dash-person') { state.dash.person = el.value; state.sel = {}; render(true); }
     else if (kind === 'list-person') { state.list.person = el.value; render(true); }
     else if (kind === 'list-cat') { state.list.cat = el.value; render(true); }
-    else if (kind === 'row') { const r = state.add.rows[Number(el.dataset.i)]; if (r) r[el.dataset.f] = el.value; }
+    else if (kind === 'row') { const r = state.add.rows[Number(el.dataset.i)]; if (r) { r[el.dataset.f] = el.value; if (el.dataset.f === 'category') { const pr = el.closest('.prow'); if (pr) pr.style.setProperty('--rc', catInfo(el.value, r.type).color); } } }
+    else if (kind === 'greeting') { state.settings.greeting = el.value.trim(); saveSetting('greeting'); renderTabs(); toast('บันทึกข้อความแล้ว ✓'); }
     else if (kind === 'cat-kw') {
       const list = cats().map((c) => Object.assign({}, c)), c = list[Number(el.dataset.i)];
       if (c) { c.keywords = el.value.split(/[,\n،]/).map((s) => s.trim()).filter(Boolean); state.settings.categories = list; saveSetting('categories'); toast('บันทึกคำสำคัญแล้ว ✓'); }
     }
   });
 
+  window.addEventListener('hashchange', route);
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeModal(); });
   document.addEventListener('visibilitychange', async () => {
     if (document.visibilityState !== 'visible' || !DB.live || Date.now() - state.lastLoad < 30000 || state.tab === 'add' || $('#modal')) return;
@@ -1055,6 +1082,7 @@
     if (s.alloc) st.alloc = s.alloc;
     if (s.capital != null) st.capital = Number(s.capital) || 0;
     if (s.capDays != null) st.capDays = Number(s.capDays) || 7;
+    if (typeof s.greeting === 'string') st.greeting = s.greeting;
     state.shopUI.form = null;
     T.apply(st.theme);
     state.themeGroup = T.get(st.theme).group;
@@ -1070,10 +1098,7 @@
       renderTabs();
       return;
     }
-    const t = (location.hash || '').replace('#/', '');
-    state.tab = TABS.some((x) => x[0] === t) ? t : 'dash';
-    render();
-    setupBack();
+    route();
   }
   window.__app = { state, render, boot };
   boot();

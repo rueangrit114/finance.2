@@ -125,6 +125,30 @@
       LS.set('moves', LS.get('moves', []).filter((r) => r.id !== id));
     },
 
+    // ข้อมูลที่เคยจดไว้ในเครื่องนี้ตอนยังเป็นโหมดทดลอง (ยังไม่ขึ้น Supabase)
+    localCounts() {
+      return { tx: LS.get('tx', []).length, shop: LS.get('shop', []).length, moves: LS.get('moves', []).length };
+    },
+    async importLocal() {
+      if (!live) throw new Error('ยังไม่ได้เชื่อมต่อ Supabase');
+      const tx = LS.get('tx', []), shop = LS.get('shop', []), moves = LS.get('moves', []);
+      for (let i = 0; i < tx.length; i += 200) {
+        const part = tx.slice(i, i + 200).map((r) => ({ date: r.date, type: r.type, amount: r.amount, category: r.category, description: r.description, person: r.person }));
+        const { error } = await sb.from('transactions').insert(part);
+        if (error) throw error;
+      }
+      if (shop.length) {
+        const { error } = await sb.from('shop_days').upsert(shop.map((r) => ({ date: r.date, sales: r.sales, cost: r.cost, profit: r.profit, note: r.note || '', alloc: r.alloc || {} })), { onConflict: 'date' });
+        if (error) throw error;
+      }
+      if (moves.length) {
+        const { error } = await sb.from('pot_moves').insert(moves.map((r) => ({ date: r.date, pot: r.pot, direction: r.dir, amount: r.amount, note: r.note || '' })));
+        if (error) throw error;
+      }
+      ['tx', 'shop', 'moves'].forEach((k) => { try { localStorage.removeItem('baan:' + k); } catch (e) { /* ignore */ } });
+      return { tx: tx.length, shop: shop.length, moves: moves.length };
+    },
+
     async setSetting(key, value) {
       if (live) {
         const { error } = await sb.from('app_settings').upsert({ key, value, updated_at: new Date().toISOString() }, { onConflict: 'key' });
