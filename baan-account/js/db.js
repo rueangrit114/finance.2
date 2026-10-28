@@ -16,7 +16,7 @@
   const uid = () => (window.crypto && crypto.randomUUID ? crypto.randomUUID() : 'id' + Date.now().toString(36) + Math.random().toString(36).slice(2, 9));
   const num = (x) => Number(x) || 0;
 
-  const normTx = (r) => ({ id: r.id, date: String(r.date).slice(0, 10), type: r.type, amount: num(r.amount), category: r.category || '', description: r.description || '', person: r.person || '' });
+  const normTx = (r) => ({ id: r.id, date: String(r.date).slice(0, 10), type: r.type, amount: num(r.amount), category: r.category || '', description: r.description || '', person: r.person || '', pot: r.pot == null ? null : Number(r.pot) });
   const normMove = (r) => ({ id: r.id, date: String(r.date).slice(0, 10), pot: Number(r.pot) || 0, dir: r.direction || r.dir, amount: num(r.amount), note: r.note || '' });
   const normShop = (r) => ({ id: r.id, date: String(r.date).slice(0, 10), sales: num(r.sales), cost: num(r.cost), profit: num(r.profit), note: r.note || '', alloc: r.alloc && r.alloc.amounts ? r.alloc : null });
 
@@ -34,6 +34,7 @@
 
   const DB = {
     live,
+    hasPot: true,
     async loadAll() {
       if (live) {
         const [tx, shop, st, mv] = await Promise.all([
@@ -45,14 +46,15 @@
         if (st.error) throw st.error;
         const settings = {};
         (st.data || []).forEach((r) => { settings[r.key] = r.value; });
-        return { tx: tx.map(normTx), shop: shop.map(normShop), moves: (mv || []).map(normMove), movesMissing: mv === null, settings };
+        DB.hasPot = tx.length ? Object.prototype.hasOwnProperty.call(tx[0], 'pot') : true;
+        return { tx: tx.map(normTx), shop: shop.map(normShop), moves: (mv || []).map(normMove), movesMissing: mv === null, potMissing: !DB.hasPot, settings };
       }
       return { tx: LS.get('tx', []).map(normTx), shop: LS.get('shop', []).map(normShop), moves: LS.get('moves', []).map(normMove), settings: LS.get('settings', {}) };
     },
 
     async addTx(rows) {
       if (live) {
-        const payload = rows.map((r) => ({ date: r.date, type: r.type, amount: r.amount, category: r.category, description: r.description, person: r.person }));
+        const payload = rows.map((r) => { const o = { date: r.date, type: r.type, amount: r.amount, category: r.category, description: r.description, person: r.person }; if (r.pot != null) o.pot = r.pot; return o; });
         const { data, error } = await sb.from('transactions').insert(payload).select();
         if (error) throw error;
         return data.map(normTx);
@@ -149,7 +151,7 @@
       if (!live) throw new Error('ยังไม่ได้เชื่อมต่อ Supabase');
       const tx = LS.get('tx', []), shop = LS.get('shop', []), moves = LS.get('moves', []);
       for (let i = 0; i < tx.length; i += 200) {
-        const part = tx.slice(i, i + 200).map((r) => ({ date: r.date, type: r.type, amount: r.amount, category: r.category, description: r.description, person: r.person }));
+        const part = tx.slice(i, i + 200).map((r) => { const o = { date: r.date, type: r.type, amount: r.amount, category: r.category, description: r.description, person: r.person }; if (r.pot != null) o.pot = r.pot; return o; });
         const { error } = await sb.from('transactions').insert(part);
         if (error) throw error;
       }

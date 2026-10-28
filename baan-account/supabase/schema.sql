@@ -55,6 +55,11 @@ create table if not exists public.pot_moves (
 );
 create index if not exists pot_moves_date_idx on public.pot_moves (date);
 
+-- 3.1) จ่ายจากกองไหน (ว่าง = เงินในมือ, 0-2 = 3 กองจากร้านข้าว, 3 = เงินเดือน/ครอบครัว)
+alter table public.transactions add column if not exists pot smallint;
+alter table public.transactions drop constraint if exists transactions_pot_check;
+alter table public.transactions add constraint transactions_pot_check check (pot is null or pot between 0 and 3);
+
 -- 5) สิทธิ์การเข้าถึง
 --    แอพนี้ไม่มีหน้าล็อกอิน (ตามที่ตกลงกัน เพราะใช้ในครอบครัว)
 --    จึงเปิดให้คีย์ anon อ่าน/เขียนได้ — อย่าแชร์ลิงก์เว็บให้คนนอกครอบครัว

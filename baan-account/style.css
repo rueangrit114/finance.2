@@ -369,3 +369,47 @@ button.plabel .caret { color: var(--muted); font-size: 11px; }
 .lbt { display: inline-flex; gap: 4px; flex: none; }
 .lrw > span:first-child { flex: 1; }
 .icon.tiny { margin-left: 0; width: 28px; height: 28px; }
+
+/* ===== รอบแก้ไข 4: การ์ดมีกรอบ+สีประจำหัวข้อ, ช่องวันที่, ทุนหมุนเวียน ===== */
+.card, .acc, .kpi, .mycard { --ca: var(--accent); }
+.c-inc { --ca: var(--income); } .c-exp { --ca: var(--expense); }
+.c-shop { --ca: var(--pot1); } .c-pot { --ca: var(--pot0); } .c-cap { --ca: var(--accent); }
+.c-mine { --ca: var(--pot0); } .c-person { --ca: var(--pot2); } .c-ana { --ca: var(--income); }
+.c-chart { --ca: var(--accent); } .c-cat { --ca: var(--pot1); } .c-list { --ca: var(--muted); } .c-set { --ca: var(--muted); } .c-add { --ca: var(--accent); }
+.kpi.k-inc { --ca: var(--income); } .kpi.k-exp { --ca: var(--expense); }
+.acc.ca-0 { --ca: var(--accent); } .acc.ca-1 { --ca: var(--pot1); } .acc.ca-2 { --ca: var(--pot0); } .acc.ca-3 { --ca: var(--pot2); }
+.acc.exp-acc { --ca: var(--expense); } .acc.inc-acc { --ca: var(--income); }
+
+.card { position: relative; overflow: hidden; padding-top: 22px; border: 1.5px solid color-mix(in srgb, var(--ca) 42%, var(--border)); background: color-mix(in srgb, var(--ca) 3.5%, var(--surface)); }
+.card::before { content: ''; position: absolute; left: 0; right: 0; top: 0; height: 5px; background: var(--ca); opacity: .9; }
+.card > h2, .card .pbar > h2 { display: flex; align-items: center; gap: 8px; }
+.card > h2::before, .card .pbar > h2::before { content: ''; width: 9px; height: 9px; border-radius: 3px; background: var(--ca); flex: none; }
+.acc { border: 1.5px solid color-mix(in srgb, var(--ca) 42%, var(--border)); border-left: 6px solid var(--ca); }
+.kpi { border: 1.5px solid color-mix(in srgb, var(--ca) 42%, var(--border)); border-top: 5px solid var(--ca); }
+.kpi.accent { border-color: var(--accent); }
+.kpis.mini .kpi { box-shadow: none; background: var(--surface); padding: 11px 10px; }
+.kpis.mini .kpi.accent { background: var(--accent); }
+.kpis.mini { gap: 8px; margin-bottom: 10px; }
+.saleline { font-size: 13px; background: var(--accent-soft); border-radius: 12px; padding: 8px 12px; margin-bottom: 8px; }
+.linkbtn { border: 0; background: none; color: var(--accent-text); font-size: 13.5px; cursor: pointer; padding: 6px 0; font-weight: 500; }
+.capdet { margin-top: 8px; padding-top: 12px; border-top: 1px dashed var(--border); }
+.mycards { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+.mycard { text-align: left; border: 1.5px solid color-mix(in srgb, var(--ca) 45%, var(--border)); border-left: 6px solid var(--ca); background: color-mix(in srgb, var(--ca) 8%, var(--surface)); border-radius: 16px; padding: 11px 12px; display: flex; flex-direction: column; gap: 2px; min-width: 0; cursor: pointer; }
+div.mycard { cursor: default; }
+.mycard span { font-size: 12.5px; color: var(--muted); overflow-wrap: anywhere; }
+.mycard b { font-size: 19px; font-weight: 600; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.mycard small { font-size: 11.5px; color: var(--muted); }
+
+/* ช่องวันที่ */
+label.f, div.f { display: flex; flex-direction: column; gap: 5px; font-size: 12.5px; color: var(--muted); font-weight: 500; }
+.datef { position: relative; display: flex; align-items: center; gap: 4px; background: var(--surface2); border-radius: 13px; padding: 3px; }
+.dnav { width: 34px; height: 36px; border: 0; background: var(--surface); border-radius: 10px; display: grid; place-items: center; cursor: pointer; color: var(--muted); flex: none; padding: 0; }
+.dnav svg { width: 16px; height: 16px; stroke: currentColor; fill: none; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
+.dshow { flex: 1; min-width: 0; border: 0; background: none; padding: 8px 4px; font-weight: 600; font-size: 14.5px; color: var(--text); cursor: pointer; text-align: center; white-space: nowrap; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; touch-action: pan-y; }
+.dhid { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; pointer-events: none; border: 0; padding: 0; }
+.addrow { grid-template-columns: 1.45fr 1fr; }
+@media (max-width: 340px) { .addrow { grid-template-columns: 1fr; } }
+.paysrc { margin-bottom: 10px; }
+.paywrap { display: flex; align-items: center; gap: 8px; margin-top: 8px; font-size: 12.5px; color: var(--muted); }
+.paywrap select { flex: 1; }
+.srow2 input[readonly] { background: transparent; border: 1px dashed var(--border); color: var(--muted); }

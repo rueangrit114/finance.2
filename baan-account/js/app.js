@@ -5,6 +5,8 @@
 
   /* ---------- ค่าคงที่ / ตัวช่วย ---------- */
   const STOCK = 'ซื้อของเข้าร้าน';
+  const SALARY = 'เงินเดือน';
+  const FAM = 3; // จ่ายจาก “เงินเดือน (ครอบครัว)” แยกจากทุนร้าน
   const MONTHS = ['มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน', 'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม'];
   const MONTHS_S = ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'];
   const WD = ['อาทิตย์', 'จันทร์', 'อังคาร', 'พุธ', 'พฤหัสบดี', 'ศุกร์', 'เสาร์'];
@@ -49,6 +51,7 @@
   const sumBy = (list, f) => list.reduce((a, x) => a + f(x), 0);
   const opt = (v, l, sel) => `<option value="${esc(v)}"${sel ? ' selected' : ''}>${esc(l)}</option>`;
   const showNum = (x) => (x ? String(round2(x)) : '');
+  const fmtField = (s) => { const d = fromISO(s); return `${WD_S[d.getDay()]} ${d.getDate()} ${MONTHS_S[d.getMonth()]} ${be(d.getFullYear())}`; };
 
   function range(mode, a) {
     if (mode === 'day') return { from: a, to: a, label: fmtLong(a) };
@@ -86,10 +89,10 @@
   /* ---------- สถานะ ---------- */
   const state = {
     tab: 'dash', tx: [], shopDays: [], moves: [],
-    settings: { theme: T.defaultId, categories: null, people: ['เกด'], alloc: null, capital: 0, capDays: 7 },
+    settings: { theme: T.defaultId, categories: null, people: ['เกด'], alloc: null, capital: 0, capDays: 7, cashAdj: 0, cards: [] },
     dash: { mode: 'month', anchor: today(), person: '', catType: 'expense' },
     list: { mode: 'month', anchor: today(), person: '', cat: '', q: '', open: new Set() },
-    add: { date: today(), person: '', text: '', rows: [], help: false },
+    add: { date: today(), person: '', text: '', rows: [], help: false, potMode: 'auto' },
     ana: { mode: 'month', anchor: today() },
     shopUI: { mode: 'month', anchor: today(), form: null, series: { sales: true, cost: true, profit: true } },
     themeGroup: 'pastel', sel: {}, open: {}, personOpen: new Set(), catOpen: null, potOpen: -1, lastLoad: Date.now(),
@@ -169,6 +172,20 @@
   }
   const stOf = (k) => (k === 'shop' ? state.shopUI : state[k]);
 
+  /* ---------- ช่องวันที่: แตะแล้วเปิดปฏิทินเลย + ปุ่ม ‹ › + ปัดซ้ายขวา ---------- */
+  function dateField(id, val, attrs) {
+    return `<div class="datef"><button type="button" class="dnav" data-act="d-step" data-t="${id}" data-d="-1" aria-label="วันก่อนหน้า">${ICON.prev}</button><button type="button" class="dshow" data-act="d-open" data-t="${id}"><span class="dtxt">${fmtField(val)}</span></button><button type="button" class="dnav" data-act="d-step" data-t="${id}" data-d="1" aria-label="วันถัดไป">${ICON.next}</button><input type="date" id="${id}" class="dhid" value="${val}" tabindex="-1" ${attrs || ''}></div>`;
+  }
+  function syncDateLabel(inp) {
+    const t = inp.parentElement && inp.parentElement.querySelector('.dtxt');
+    if (t && inp.value) t.textContent = fmtField(inp.value);
+  }
+  function setDate(inp, val) {
+    inp.value = val; syncDateLabel(inp);
+    inp.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+  const potOpts = (sel) => opt('', 'เงินในมือ', sel == null) + allocCfg().names.map((n, i) => opt(i, n, sel === i)).join('') + opt(FAM, 'เงินเดือน (ครอบครัว)', sel === FAM);
+
   /* ---------- แถวรายการ ---------- */
   function txRow(t, compact) {
     const c = catInfo(t.category, t.type);
@@ -196,10 +213,93 @@
   }
   const entryAmounts = (e) => (e.alloc && e.alloc.amounts ? e.alloc.amounts : defaultAmounts(e.profit, allocCfg()));
   function potStats() {
-    const s = [0, 1, 2].map(() => ({ auto: 0, manIn: 0, out: 0 }));
+    const s = [0, 1, 2].map(() => ({ auto: 0, manIn: 0, out: 0, spend: 0 }));
     state.shopDays.forEach((e) => { const a = entryAmounts(e); [0, 1, 2].forEach((i) => { s[i].auto += a[i] || 0; }); });
     state.moves.forEach((m) => { const x = s[m.pot]; if (!x) return; if (m.dir === 'in') x.manIn += m.amount; else x.out += m.amount; });
-    return s.map((x) => ({ auto: round2(x.auto), manIn: round2(x.manIn), out: round2(x.out), in: round2(x.auto + x.manIn), bal: round2(x.auto + x.manIn - x.out) }));
+    state.tx.forEach((t) => { if (t.type === 'expense' && t.pot != null && s[t.pot]) s[t.pot].spend += t.amount; }); // จ่ายจากกองตอนจดรายการ
+    return s.map((x) => ({ auto: round2(x.auto), manIn: round2(x.manIn), out: round2(x.out + x.spend), in: round2(x.auto + x.manIn), bal: round2(x.auto + x.manIn - x.out - x.spend) }));
+  }
+  // เงินเดือน/ครอบครัว แยกจากทุนร้าน: รายรับหมวดเงินเดือน และรายจ่ายที่เลือก “จ่ายจากเงินเดือน”
+  const isFam = (t) => (t.type === 'income' ? t.category === SALARY : t.pot === FAM);
+  function capCalc(from, to) {
+    const l = inRange(state.tx, from, to).filter((t) => !isFam(t));
+    const hand = round2(total(l, 'income') - total(l, 'expense'));
+    const psx = [0, 1, 2].map(() => ({ inn: 0, out: 0 }));
+    state.shopDays.filter((e) => e.date >= from && e.date <= to).forEach((e) => { const a = entryAmounts(e); [0, 1, 2].forEach((i) => { psx[i].inn += a[i] || 0; }); });
+    state.moves.filter((m) => m.date >= from && m.date <= to).forEach((m) => { if (psx[m.pot]) { if (m.dir === 'in') psx[m.pot].inn += m.amount; else psx[m.pot].out += m.amount; } });
+    inRange(state.tx, from, to).forEach((t) => { if (t.type === 'expense' && t.pot != null && psx[t.pot]) psx[t.pot].out += t.amount; });
+    const bal = psx.map((x) => round2(x.inn - x.out));
+    const potSum = round2(sumBy(bal, (x) => x));
+    const adj = from <= '0000-01-01' ? (Number(state.settings.cashAdj) || 0) : 0;
+    return { hand, adj, psx, bal, potSum, free: round2(hand + adj - potSum) };
+  }
+  function famCalc(from, to) {
+    const l = inRange(state.tx, from, to);
+    const inn = sumBy(l.filter((t) => t.type === 'income' && t.category === SALARY), (t) => t.amount);
+    const out = sumBy(l.filter((t) => t.type === 'expense' && t.pot === FAM), (t) => t.amount);
+    return { inn: round2(inn), out: round2(out), bal: round2(inn - out) };
+  }
+  const ALL_FROM = '0000-01-01', ALL_TO = '9999-12-31';
+
+  /* การ์ดของฉัน (กำหนดเองในหน้าสรุป) */
+  function cardSrcOptions(sel) {
+    const g = (label, items) => `<optgroup label="${label}">${items.map(([v, l]) => opt(v, l, v === sel)).join('')}</optgroup>`;
+    const ppl = knownPeople(), nm = allocCfg().names;
+    return g('รายรับ', [['inc|all', 'รายรับทั้งหมด'], ...catsOf('income').map((c) => ['inc|cat|' + c.name, 'หมวด ' + c.name]), ...ppl.map((p) => ['inc|person|' + p, 'ของ ' + p])]) +
+      g('รายจ่าย', [['exp|all', 'รายจ่ายทั้งหมด'], ...catsOf('expense').map((c) => ['exp|cat|' + c.name, 'หมวด ' + c.name]), ...ppl.map((p) => ['exp|person|' + p, 'ของ ' + p])]) +
+      g('ยอดคงเหลือ', [['free', 'ทุนที่เหลือรวม'], ...nm.map((n, i) => ['pot|' + i, 'กอง ' + n]), ['fam', 'เงินเดือน (ครอบครัว)']]);
+  }
+  function cardValue(c) {
+    const r = range(state.dash.mode, state.dash.anchor);
+    const list = c.scope === 'all' ? state.tx : inRange(state.tx, r.from, r.to);
+    const [kind, a, b] = String(c.src).split('|');
+    if (kind === 'free') return { v: capCalc(ALL_FROM, ALL_TO).free, bal: true, sub: 'ทุนที่เหลือรวม' };
+    if (kind === 'pot') return { v: potStats()[Number(a)].bal, bal: true, sub: 'คงเหลือในกอง' };
+    if (kind === 'fam') return { v: famCalc(ALL_FROM, ALL_TO).bal, bal: true, sub: 'คงเหลือ' };
+    const type = kind === 'inc' ? 'income' : 'expense';
+    let l = list.filter((t) => t.type === type);
+    if (a === 'cat') l = l.filter((t) => t.category === b); else if (a === 'person') l = l.filter((t) => t.person === b);
+    return { v: round2(sumBy(l, (t) => t.amount)), type, sub: (c.scope === 'all' ? 'ทั้งหมด' : r.label) + ` · ${l.length} รายการ` };
+  }
+  function openCard(id, quick) {
+    const old = id ? (state.settings.cards || []).find((c) => c.id === id) : null;
+    const c = old || Object.assign({ name: '', emoji: '⭐', color: '#4f8cff', src: 'inc|all', scope: 'period' }, quick || {});
+    state.cardEdit = old ? old.id : null;
+    openModal(`<h3>${old ? 'แก้ไขการ์ด' : 'เพิ่มการ์ด'}</h3>
+      <div class="fields">
+        <label class="f">ชื่อการ์ด<input id="cdName" value="${esc(c.name)}" placeholder="เช่น เงินเดือนพี่"></label>
+        <label class="f">ไอคอน<input id="cdEmoji" value="${esc(c.emoji)}" maxlength="4"></label>
+      </div>
+      <div class="fields one"><label class="f">ให้นับอะไร<select id="cdSrc">${cardSrcOptions(c.src)}</select></label></div>
+      <div class="fields"><label class="f">ช่วงเวลา<select id="cdScope">${opt('period', 'ตามช่วงที่เลือกด้านบน', c.scope !== 'all')}${opt('all', 'ทั้งหมด', c.scope === 'all')}</select></label>
+        <label class="f">สี<input type="color" id="cdColor" value="${esc(c.color)}"></label></div>
+      <p class="hint">ถ้าเลือก “ยอดคงเหลือ” ระบบแสดงยอดสะสมเสมอ ไม่ขึ้นกับช่วงเวลา</p>
+      <div class="actions">${old ? '<button class="btn danger" data-act="card-del">ลบการ์ด</button>' : '<button class="btn" data-act="modal-close">ยกเลิก</button>'}<button class="btn primary" data-act="card-save">บันทึก</button></div>`);
+  }
+  function saveCard() {
+    const name = $('#cdName').value.trim();
+    if (!name) return toast('ตั้งชื่อการ์ดก่อน', true);
+    const c = { id: state.cardEdit || 'c' + Date.now().toString(36), name, emoji: $('#cdEmoji').value.trim() || '⭐', color: $('#cdColor').value, src: $('#cdSrc').value, scope: $('#cdScope').value };
+    const list = (state.settings.cards || []).slice(), i = list.findIndex((x) => x.id === c.id);
+    if (i >= 0) list[i] = c; else list.push(c);
+    state.settings.cards = list; saveSetting('cards'); closeModal(); toast('บันทึกการ์ดแล้ว ✓'); render(true);
+  }
+  function openAdjust() {
+    const all = capCalc(ALL_FROM, ALL_TO);
+    openModal(`<h3>ปรับให้ตรงเงินจริง</h3>
+      <p class="lead">นับเงินทุนที่อยู่ในมือตอนนี้ <b>ไม่รวม</b>เงินที่แยกเก็บไว้ในกอง แล้วพิมพ์ตัวเลขที่นับได้ ระบบจะปรับยอดให้ตรง (ตอนนี้แอพคำนวณได้ ${money(all.free)}${all.adj ? ` · ปรับไว้แล้ว ${money(all.adj)}` : ''})</p>
+      <label class="f">เงินทุนในมือจริง (บาท)<input id="adjAmt" class="money-in" inputmode="decimal" placeholder="${all.free}"></label>
+      <div class="actions">${all.adj ? '<button class="btn danger" data-act="adj-clear">ล้างการปรับ</button>' : '<button class="btn" data-act="modal-close">ยกเลิก</button>'}<button class="btn primary" data-act="adj-save">ปรับยอด</button></div>`);
+  }
+  function saveAdjust(clear) {
+    const all = capCalc(ALL_FROM, ALL_TO);
+    let adj = 0;
+    if (!clear) {
+      const raw = $('#adjAmt').value.trim();
+      if (raw === '') return toast('พิมพ์เงินที่นับได้ก่อน', true);
+      adj = round2(num(raw) - (all.hand - all.potSum));
+    }
+    state.settings.cashAdj = adj; saveSetting('cashAdj'); closeModal(); toast(clear ? 'ล้างการปรับแล้ว' : 'ปรับยอดแล้ว ✓'); render(true);
   }
 
   /* ================= หน้าสรุป ================= */
@@ -302,72 +402,101 @@
       }).join('');
     }
 
-    // คงเหลือในมือ แยกตามที่เก็บ (หักยอด 3 กองจากหน้าร้านข้าว)
+    // ทุนหมุนเวียน = เงินในมือ (ไม่รวมเงินเดือน) − เงินที่แยกไว้ใน 3 กอง
     const cfg = allocCfg();
     const view = d.potView === 'period' ? 'period' : 'all';
-    const pFrom = view === 'period' ? r.from : '0000-01-01', pTo = view === 'period' ? r.to : '9999-12-31';
-    const handTx = inRange(state.tx, pFrom, pTo);
-    const hand = total(handTx, 'income') - total(handTx, 'expense');
-    const psx = [0, 1, 2].map(() => ({ inn: 0, out: 0 }));
-    state.shopDays.filter((e) => e.date >= pFrom && e.date <= pTo).forEach((e) => { const a = entryAmounts(e); [0, 1, 2].forEach((i) => { psx[i].inn += a[i] || 0; }); });
-    state.moves.filter((m) => m.date >= pFrom && m.date <= pTo).forEach((m) => { if (psx[m.pot]) { if (m.dir === 'in') psx[m.pot].inn += m.amount; else psx[m.pot].out += m.amount; } });
-    const bal = psx.map((x) => round2(x.inn - x.out));
-    const potSum = sumBy(bal, (x) => x), free = round2(hand - potSum);
-    const barBase = Math.max(1, hand, sumBy(bal.filter((x) => x > 0), (x) => x));
-    const potCard = state.shopDays.length || state.moves.length ? `<div class="card"><div class="pbar" style="margin-bottom:8px"><h2>คงเหลือในมือ แยกตามที่เก็บ</h2><a class="link" data-act="tab" data-v="shop">ดูที่หน้าร้านข้าว ›</a></div>
-      <div class="seg" style="margin-bottom:10px"><button class="${view === 'all' ? 'on' : ''}" data-act="pot-view" data-v="all">สะสมทั้งหมด</button><button class="${view === 'period' ? 'on' : ''}" data-act="pot-view" data-v="period">${esc(r.label)}</button></div>
-      <div class="potbig"><small>คงเหลือในมือ (รายรับ − รายจ่าย ${view === 'all' ? 'ทั้งหมด' : 'ช่วงนี้'}, ทุกคน)</small><b class="${hand < 0 ? 'exp' : ''}">${money(hand)}</b></div>
-      <div class="minus">หัก ที่เก็บแยกไว้ในแต่ละกอง</div>
-      ${[0, 1, 2].map((i) => `<div class="lrow"><div class="nm"><i class="sw" style="background:var(--pot${i})"></i><span>${esc(cfg.names[i])}</span></div><div class="num ${bal[i] < 0 ? 'exp' : ''}">${money(bal[i])}</div><div class="bar"><i style="width:${Math.min(100, Math.max(0, bal[i]) / barBase * 100)}%;background:var(--pot${i})"></i></div></div>`).join('')}
-      <div class="freebox ${free < 0 ? 'neg' : ''}"><div><b>เหลือส่วนที่ไม่ได้เก็บแยกไว้</b><small>${free < 0 ? 'ติดลบ = เงินในมือน้อยกว่ายอดที่ตั้งไว้ในกอง' : 'ใช้จ่ายได้ปกติ'}</small></div><b class="num">${money(free)}</b></div>
-      <p class="hint">ยอดแต่ละกองคิดจาก (แบ่งจากกำไรร้านข้าว + โอนเข้า − โอนออก) ${view === 'all' ? 'ทั้งหมด' : 'ในช่วงที่เลือก'}</p></div>` : '';
+    const allc = capCalc(ALL_FROM, ALL_TO), cv = view === 'period' ? capCalc(r.from, r.to) : allc;
+    const barBase = Math.max(1, cv.hand, sumBy(cv.bal.filter((x) => x > 0), (x) => x));
+    const shopR = state.shopDays.filter((e) => e.date >= r.from && e.date <= r.to);
+    const sSales = sumBy(shopR, (e) => e.sales), sProfit = sumBy(shopR, (e) => e.profit), gotCap = round2(sSales - sProfit);
+    const isToday = d.mode === 'day' && d.anchor === now;
+    const capOpen = !!state.open.capdet;
+    const capCard = state.tx.length || state.shopDays.length || state.moves.length ? `<div class="card c-cap"><div class="pbar" style="margin-bottom:10px"><h2>ทุนหมุนเวียน</h2><a class="link" data-act="tab" data-v="shop">ร้านข้าว ›</a></div>
+      <div class="kpis mini">
+        <div class="kpi"><span>${isToday ? 'ทุนที่ได้วันนี้' : 'ทุนที่ได้ช่วงนี้'}</span><b>${money(gotCap)}</b><small>${shopR.length ? 'ยอดขาย − กำไร' : 'ยังไม่จดยอดร้านข้าว'}</small></div>
+        <div class="kpi accent"><span>ทุนที่เหลือรวม</span><b>${money(allc.free)}</b><small>ในมือ ไม่รวมกอง</small></div>
+        <div class="kpi"><span>เงิน 3 กอง</span><b>${money(allc.potSum)}</b><small>เก็บแยกไว้</small></div>
+      </div>
+      ${shopR.length && !d.person ? `<div class="saleline">🍚 ขายร้านข้าว ${money(sSales)} = ทุน ${money(gotCap)} + กำไร ${money(sProfit)}</div>` : ''}
+      <button class="linkbtn" data-act="acc" data-v="capdet">${capOpen ? 'ซ่อนวิธีคิด ▴' : 'ดูวิธีคิด / ปรับให้ตรงเงินจริง ▾'}</button>
+      ${capOpen ? `<div class="capdet">
+        <div class="seg" style="margin-bottom:10px"><button class="${view === 'all' ? 'on' : ''}" data-act="pot-view" data-v="all">สะสมทั้งหมด</button><button class="${view === 'period' ? 'on' : ''}" data-act="pot-view" data-v="period">${esc(r.label)}</button></div>
+        <div class="potbig"><small>เงินในมือ (รายรับ − รายจ่าย ไม่รวมเงินเดือน)${cv.adj ? ' + ปรับยอด ' + money(cv.adj) : ''}</small><b class="${cv.hand + cv.adj < 0 ? 'exp' : ''}">${money(cv.hand + cv.adj)}</b></div>
+        <div class="minus">หัก ที่เก็บแยกไว้ในแต่ละกอง</div>
+        ${[0, 1, 2].map((i) => `<div class="lrow"><div class="nm"><i class="sw" style="background:var(--pot${i})"></i><span>${esc(cfg.names[i])}</span></div><div class="num ${cv.bal[i] < 0 ? 'exp' : ''}">${money(cv.bal[i])}</div><div class="bar"><i style="width:${Math.min(100, Math.max(0, cv.bal[i]) / barBase * 100)}%;background:var(--pot${i})"></i></div></div>`).join('')}
+        <div class="freebox ${cv.free < 0 ? 'neg' : ''}"><div><b>ทุนที่เหลือ</b><small>${cv.free < 0 ? 'ติดลบ = เงินในมือน้อยกว่ายอดที่ตั้งไว้ในกอง' : 'เงินที่ใช้หมุนร้านได้'}</small></div><b class="num">${money(cv.free)}</b></div>
+        <p class="hint">ยอดกอง = แบ่งจากกำไรร้านข้าว + โอนเข้า − โอนออก − รายจ่ายที่เลือก “จ่ายจากกอง”</p>
+        <button class="btn sm" data-act="adj-open">นับเงินจริง / ปรับยอด</button>
+      </div>` : ''}</div>` : '';
+
+    // เงินเดือน (ครอบครัว) + การ์ดของฉัน
+    const fam = famCalc(ALL_FROM, ALL_TO), famP = famCalc(r.from, r.to);
+    const cards = state.settings.cards || [];
+    const quick = [['ซื้อของเข้าร้าน', '🌾', 'exp|cat|' + STOCK], ['รายจ่ายทั้งหมด', '💸', 'exp|all'], ...(knownPeople()[0] ? [['รายจ่าย ' + knownPeople()[0], '👤', 'exp|person|' + knownPeople()[0]]] : [])];
+    const mine = `<div class="card c-mine"><div class="pbar" style="margin-bottom:10px"><h2>การ์ดของฉัน</h2><button class="btn sm" data-act="card-add">+ เพิ่มการ์ด</button></div>
+      <div class="mycards">
+        ${fam.inn || fam.out ? `<div class="mycard" style="--ca:#3c8fd0"><span>💼 เงินเดือน (ครอบครัว)</span><b class="${fam.bal < 0 ? 'exp' : ''}">${money(fam.bal)}</b><small>คงเหลือ · ช่วงนี้รับ ${money(famP.inn)} จ่าย ${money(famP.out)}</small></div>` : ''}
+        ${cards.map((c) => { const x = cardValue(c); return `<button class="mycard" style="--ca:${esc(c.color)}" data-act="card-edit" data-id="${c.id}"><span>${esc(c.emoji)} ${esc(c.name)}</span><b class="${x.bal ? (x.v < 0 ? 'exp' : '') : x.type === 'income' ? 'inc' : 'exp'}">${money(x.v)}</b><small>${esc(x.sub)}</small></button>`; }).join('')}
+      </div>
+      ${!cards.length ? `<p class="hint" style="margin:10px 0 8px">เพิ่มการ์ดที่อยากเห็นเอง เช่น</p><div class="chips tight">${quick.map(([n, em, src]) => `<button class="chip" data-act="card-quick" data-n="${esc(n)}" data-e="${em}" data-src="${esc(src)}">+ ${esc(n)}</button>`).join('')}</div>` : ''}
+    </div>`;
 
     v.innerHTML = `
       ${localBanner()}
       ${periodBar('dash', d)}
       <div class="filters">${personSelect('dashPerson', d.person, 'data-change="dash-person"')}</div>
       <div class="kpis">
-        <div class="kpi"><span>รายรับ</span><b class="inc">${money(inc)}</b></div>
-        <div class="kpi"><span>รายจ่าย</span><b class="exp">${money(exp)}</b></div>
+        <div class="kpi k-inc"><span>รายรับ</span><b class="inc">${money(inc)}</b></div>
+        <div class="kpi k-exp"><span>รายจ่าย</span><b class="exp">${money(exp)}</b></div>
         <div class="kpi accent"><span>คงเหลือในมือ</span><b>${money(inc - exp)}</b></div>
       </div>
-      ${potCard}
-      <div class="card"><h2>ประวัติรายรับรายจ่าย</h2><p class="lead">${d.mode === 'day' ? '7 วันล่าสุด' : d.mode === 'year' ? 'รายเดือน' : 'รายวัน'} · แตะแท่งกราฟเพื่อดูรายละเอียด</p>
+      ${capCard}
+      ${mine}
+      <div class="card c-chart"><h2>ประวัติรายรับรายจ่าย</h2><p class="lead">${d.mode === 'day' ? '7 วันล่าสุด' : d.mode === 'year' ? 'รายเดือน' : 'รายวัน'} · แตะแท่งกราฟเพื่อดูรายละเอียด</p>
         <div class="chartgrid"><div class="cg-chart">${chart}
           <div class="legend"><span><i style="background:var(--expense)"></i>รายจ่าย</span><span><i style="background:var(--income)"></i>รายรับ</span></div></div>
           <aside class="cg-side ${state.sel.dash >= 0 ? '' : 'idle'}" id="side-dash">${dashPanel(state.sel.dash)}</aside></div>
         ${n > 0 ? `<div class="avgs"><div><small>รายจ่ายเฉลี่ย${avgLabel}</small><b class="exp">${money(exp / n)}</b></div><div><small>รายรับเฉลี่ย${avgLabel}</small><b class="inc">${money(inc / n)}</b></div></div>` : ''}
       </div>
       <div class="grid2">
-        <div class="card"><div class="pbar" style="margin-bottom:10px"><h2>แยกตามหมวด</h2>
+        <div class="card c-cat"><div class="pbar" style="margin-bottom:10px"><h2>แยกตามหมวด</h2>
           <div class="seg"><button class="${d.catType === 'expense' ? 'on' : ''}" data-act="dash-cattype" data-v="expense">รายจ่าย</button><button class="${d.catType === 'income' ? 'on' : ''}" data-act="dash-cattype" data-v="income">รายรับ</button></div></div>
           ${cl.length ? `<div class="donut-wrap">${C.donut({ data: cl, top: d.catType === 'expense' ? 'รายจ่าย' : 'รายรับ', bottom: money(ctotal) })}
             <div class="leg-list">${cl.map((x) => `<div class="lrow"><div class="nm"><i class="sw" style="background:${x.color}"></i><span>${esc(x.emoji)} ${esc(x.label)}</span></div><div class="num">${money(x.value)}<span class="pc">${pct(x.value, ctotal)}%</span></div><div class="bar"><i style="width:${pct(x.value, ctotal)}%;background:${x.color}"></i></div></div>`).join('')}</div></div>`
             : '<div class="empty"><div class="big">🍃</div>ยังไม่มีข้อมูลในช่วงนี้</div>'}
         </div>
-        <div class="card"><h2>ใครใช้เท่าไหร่</h2><p class="lead">แตะชื่อเพื่อดูว่าใช้อะไรไปบ้าง</p>
+        <div class="card c-person"><h2>ใครใช้เท่าไหร่</h2><p class="lead">แตะชื่อเพื่อดูว่าใช้อะไรไปบ้าง</p>
           ${personHtml || '<div class="empty"><div class="big">👤</div>ยังไม่มีข้อมูล</div>'}
         </div>
       </div>
       <div class="sp"></div>
-      <div class="card"><h2>${d.mode === 'day' ? 'รายการของวันนี้' : d.mode === 'year' ? 'สรุปรายเดือน' : 'สรุปวันต่อวัน'}</h2>${d.mode === 'day' ? '' : '<p class="lead">แตะที่แถวเพื่อดูรายละเอียด</p>'}${daily}</div>`;
+      <div class="card c-list"><h2>${d.mode === 'day' ? 'รายการของวันนี้' : d.mode === 'year' ? 'สรุปรายเดือน' : 'สรุปวันต่อวัน'}</h2>${d.mode === 'day' ? '' : '<p class="lead">แตะที่แถวเพื่อดูรายละเอียด</p>'}${daily}</div>`;
   }
 
   /* ================= หน้าจดรายการ ================= */
   function reparse() {
     const a = state.add;
     a.rows = P.parse(a.text, { date: a.date, today: today(), person: (a.person || '').trim(), people: knownPeople(), categories: cats() });
+    a.rows.forEach((r) => { r.pot = resolvePot(r); });
+  }
+  function resolvePot(r) {
+    if (r.type !== 'expense' || !DB.hasPot) return null;
+    const m = state.add.potMode;
+    if (m === 'hand') return null;
+    if (m === 'auto') { const p = (r.person || '').trim(), i = p ? allocCfg().names.indexOf(p) : -1; return i >= 0 ? i : null; }
+    return Number(m);
   }
   function viewAdd(v) {
     const a = state.add;
     v.innerHTML = `
-      <div class="card addcard">
+      <div class="card addcard c-add">
         <div class="addrow">
-          <label class="f">วันที่<input type="date" id="addDate" value="${a.date}" data-input="add-date"></label>
+          <div class="f"><span class="fl">วันที่</span>${dateField('addDate', a.date, 'data-input="add-date"')}</div>
           <label class="f">ชื่อผู้ใช้<input id="addPerson" list="peopleDL" placeholder="เช่น เกด" value="${esc(a.person)}" data-input="add-person"></label>
         </div>
         <datalist id="peopleDL">${knownPeople().map((p) => `<option value="${esc(p)}">`).join('')}</datalist>
         ${knownPeople().length ? `<div class="chips tight">${knownPeople().map((p) => `<button class="chip ${a.person === p ? 'on' : ''}" data-act="add-chip" data-v="${esc(p)}">${esc(p)}</button>`).join('')}</div>` : ''}
+        ${DB.hasPot ? `<label class="f paysrc">จ่ายจาก (ใช้กับรายจ่ายทั้งชุด)<select data-change="add-potmode">${opt('auto', 'อัตโนมัติ (ชื่อตรงกับกอง = หักจากกองนั้น)', a.potMode === 'auto')}${opt('hand', 'เงินในมือ', a.potMode === 'hand')}${allocCfg().names.map((n, i) => opt(i, n, String(a.potMode) === String(i))).join('')}${opt(FAM, 'เงินเดือน (ครอบครัว)', String(a.potMode) === String(FAM))}</select></label>` : (DB.live ? '<p class="hint">ยังเลือก “จ่ายจากกอง” ไม่ได้ ให้รันไฟล์ update-pot.sql ใน Supabase หนึ่งครั้ง</p>' : '')}
         <textarea id="addText" data-input="add-text" placeholder="พิมพ์หรือวางรายการที่นี่">${esc(a.text)}</textarea>
         <div class="qline"><button class="qbtn ${a.help ? 'on' : ''}" data-act="add-help" aria-label="วิธีพิมพ์">?</button>${a.help ? '' : '<span class="muted">วิธีพิมพ์</span>'}</div>
         ${a.help ? `<div class="helpbox">• พิมพ์หลายรายการได้ ขึ้นบรรทัดใหม่หรือเขียนต่อกันก็ได้<br>• ใส่ชื่อ: <code>เกด: ข้าว 50</code> หรือ <code>@เกด ข้าว 50</code><br>• รายรับ ใส่ <code>+</code> นำหน้า เช่น <code>+ ขายของ 300</code><br>• ระบุวัน: <code>เมื่อวาน</code> หรือ <code>27/10</code><br>• ตัวอย่าง: <code>ซื้อถ่านปิ้งย่าง 40 บาท ซื้อขนม 15 บาท</code></div>` : ''}
@@ -386,6 +515,7 @@
       <input class="money-in" inputmode="decimal" value="${r.amount}" data-input="row" data-i="${i}" data-f="amount">
       <div class="two"><select data-change="row" data-i="${i}" data-f="category">${opts}</select>
         <input list="peopleDL" placeholder="ชื่อ" value="${esc(r.person)}" data-input="row" data-i="${i}" data-f="person"></div>
+      ${r.type === 'expense' && DB.hasPot ? `<label class="paywrap"><span>จ่ายจาก</span><select data-change="row" data-i="${i}" data-f="pot">${potOpts(r.pot)}</select></label>` : ''}
     </div>`;
   }
   function sumLine() {
@@ -406,7 +536,7 @@
     if (!rows.length) return toast('ยังไม่มีรายการที่บันทึกได้', true);
     btn.disabled = true;
     try {
-      const made = await DB.addTx(rows.map((r) => ({ date: r.date, type: r.type, amount: r.amount, category: r.category, description: r.desc, person: (r.person || '').trim() })));
+      const made = await DB.addTx(rows.map((r) => ({ date: r.date, type: r.type, amount: r.amount, category: r.category, description: r.desc, person: (r.person || '').trim(), pot: r.type === 'expense' ? r.pot : null })));
       state.tx.push(...made);
       const ps = new Set(state.settings.people || []);
       made.forEach((t) => { if (t.person) ps.add(t.person); });
@@ -424,16 +554,16 @@
     if (l.cat) cur = cur.filter((t) => t.category === l.cat);
     const q = l.q.trim().toLowerCase();
     if (q) cur = cur.filter((t) => (t.description + ' ' + t.category + ' ' + t.person).toLowerCase().includes(q));
-    if (!cur.length) return '<div class="card"><div class="empty"><div class="big">🌿</div>ไม่พบรายการในช่วงนี้</div></div>';
+    if (!cur.length) return '<div class="card c-list"><div class="empty"><div class="big">🌿</div>ไม่พบรายการในช่วงนี้</div></div>';
     const inc = total(cur, 'income'), exp = total(cur, 'expense');
     const head = `<div class="sumline"><span>${cur.length} รายการ</span><span><span class="exp">จ่าย ${money(exp)}</span> · <span class="inc">รับ ${money(inc)}</span></span></div>`;
 
-    if (l.mode === 'day') return head + `<div class="card">${cur.map((t) => txRow(t)).join('')}</div>`;
+    if (l.mode === 'day') return head + `<div class="card c-list">${cur.map((t) => txRow(t)).join('')}</div>`;
 
     if (l.mode === 'year') {
       const m = new Map();
       cur.forEach((t) => { const k = t.date.slice(0, 7); const o = m.get(k) || { n: 0, inc: 0, exp: 0 }; o.n++; if (t.type === 'income') o.inc += t.amount; else o.exp += t.amount; m.set(k, o); });
-      return head + `<div class="card">${[...m.entries()].sort((a, b) => (a[0] < b[0] ? 1 : -1)).map(([k, o]) => {
+      return head + `<div class="card c-list">${[...m.entries()].sort((a, b) => (a[0] < b[0] ? 1 : -1)).map(([k, o]) => {
         const mi = Number(k.slice(5)) - 1;
         return `<div class="mrow" data-act="list-month" data-date="${k}-01"><div class="mn"><b>${MONTHS[mi]}</b><small class="muted">${o.n} รายการ</small></div><div class="mv"><span class="exp">${o.exp ? '-' + money(o.exp) : '–'}</span><span class="inc">${o.inc ? '+' + money(o.inc) : ''}</span></div>${ICON.next}</div>`;
       }).join('')}</div>`;
@@ -442,7 +572,7 @@
     const auto = !!(q || l.cat);
     const groups = new Map();
     cur.slice().sort((a, b) => (a.date < b.date ? 1 : -1)).forEach((t) => { if (!groups.has(t.date)) groups.set(t.date, []); groups.get(t.date).push(t); });
-    return head + `<div class="card">${[...groups.entries()].map(([date, list]) => {
+    return head + `<div class="card c-list">${[...groups.entries()].map(([date, list]) => {
       const di = total(list, 'income'), de = total(list, 'expense'), open = auto || l.open.has(date);
       return `<div class="dgrp ${open ? 'open' : ''}"><div class="dhead" data-act="list-toggle" data-date="${date}"><div class="dn"><b>${fmtRow(date)}</b><small class="muted">${list.length} รายการ</small></div>
         <div class="mv"><span class="exp">${de ? '-' + money(de) : '–'}</span><span class="inc">${di ? '+' + money(di) : ''}</span></div>${ICON.chev}</div>
@@ -477,7 +607,7 @@
     const yearSel = (id) => `<select id="${id}">${ys.map((yy) => opt(yy, 'พ.ศ. ' + be(yy), yy === y)).join('')}</select>`;
     let body, hint = '';
     if (st.mode === 'day' || st.mode === 'week') {
-      body = `<label class="f">วันที่<input type="date" id="pkDate" value="${st.anchor}"></label>`;
+      body = `<div class="f"><span class="fl">วันที่</span>${dateField('pkDate', st.anchor)}</div>`;
       if (st.mode === 'week') hint = '<p class="hint">เลือกวันไหนก็ได้ ระบบจะแสดงทั้งสัปดาห์ที่มีวันนั้น</p>';
     } else if (st.mode === 'month') {
       body = `<div class="fields"><label class="f">เดือน<select id="pkMonth">${MONTHS.map((n, i) => opt(i, n, i === m)).join('')}</select></label><label class="f">ปี${yearSel('pkYear')}</label></div>`;
@@ -502,18 +632,20 @@
     const opts = (type, sel) => catsOf(type).map((c) => opt(c.name, c.emoji + ' ' + c.name, c.name === sel)).join('');
     openModal(`<h3>แก้ไขรายการ</h3>
       <div class="fields">
-        <label class="f">วันที่<input type="date" id="mDate" value="${t.date}"></label>
+        <div class="f"><span class="fl">วันที่</span>${dateField('mDate', t.date)}</div>
         <label class="f">ประเภท<select id="mType">${opt('expense', 'รายจ่าย', t.type === 'expense')}${opt('income', 'รายรับ', t.type === 'income')}</select></label>
         <label class="f">จำนวนเงิน<input id="mAmt" class="money-in" inputmode="decimal" value="${t.amount}"></label>
         <label class="f">หมวด<select id="mCat">${opts(t.type, t.category)}</select></label>
+        ${DB.hasPot ? `<label class="f" id="mPotWrap" ${t.type === 'expense' ? '' : 'hidden'}>จ่ายจาก<select id="mPot">${potOpts(t.pot)}</select></label>` : ''}
       </div>
       <div class="fields one"><label class="f">รายการ<input id="mDesc" value="${esc(t.description)}"></label>
         <label class="f">ชื่อ<input id="mPerson" list="peopleDL2" value="${esc(t.person)}"><datalist id="peopleDL2">${knownPeople().map((p) => `<option value="${esc(p)}">`).join('')}</datalist></label></div>
       <div class="actions"><button class="btn" data-act="modal-close">ยกเลิก</button><button class="btn primary" data-act="tx-save" data-id="${id}">บันทึก</button></div>`);
-    $('#mType').addEventListener('change', () => { const ty = $('#mType').value; $('#mCat').innerHTML = opts(ty, P.FALLBACK[ty]); });
+    $('#mType').addEventListener('change', () => { const ty = $('#mType').value; $('#mCat').innerHTML = opts(ty, P.FALLBACK[ty]); const w = $('#mPotWrap'); if (w) w.hidden = ty !== 'expense'; });
   }
   async function saveTxEdit(id) {
     const patch = { date: $('#mDate').value, type: $('#mType').value, amount: num($('#mAmt').value), category: $('#mCat').value, description: $('#mDesc').value.trim(), person: $('#mPerson').value.trim() };
+    if (DB.hasPot) { const pv = $('#mPot') ? $('#mPot').value : ''; patch.pot = patch.type === 'expense' && pv !== '' ? Number(pv) : null; }
     if (!patch.date || !(patch.amount >= 0)) return toast('กรอกวันที่และจำนวนเงินให้ถูกต้อง', true);
     try {
       const updated = await DB.updateTx(id, patch);
@@ -537,7 +669,7 @@
         <label class="f">กอง<select id="mvPot">${cfg.names.map((n, i) => opt(i, n, i === pot)).join('')}</select></label>
         <label class="f">ประเภท<select id="mvDir">${opt('out', 'โอนออก (เอาไปใช้)', !mv || mv.dir === 'out')}${opt('in', 'โอนเข้า (ใส่เพิ่ม)', mv && mv.dir === 'in')}</select></label>
         <label class="f">จำนวนเงิน<input id="mvAmt" class="money-in" inputmode="decimal" placeholder="0" value="${mv ? mv.amount : ''}"></label>
-        <label class="f">วันที่<input type="date" id="mvDate" value="${mv ? mv.date : today()}"></label>
+        <div class="f"><span class="fl">วันที่</span>${dateField('mvDate', mv ? mv.date : today())}</div>
       </div>
       <div class="fields one"><label class="f">หมายเหตุ<input id="mvNote" placeholder="เช่น เอาไปซื้อของเข้าร้าน" value="${mv ? esc(mv.note) : ''}"></label></div>
       <div class="actions"><button class="btn" data-act="modal-close">ยกเลิก</button><button class="btn primary" data-act="move-save">บันทึก</button></div>`);
@@ -633,7 +765,7 @@
     if (e) {
       f.sales = String(e.sales); f.cost = String(e.cost); f.profit = String(e.profit); f.note = e.note || '';
       const am = entryAmounts(e);
-      f.rows = [0, 1, 2].map((i) => ({ mode: 'amt', pct: '', amt: String(am[i] || 0) }));
+      f.rows = [{ mode: 'amt', pct: '', amt: String(am[0] || 0) }, { mode: 'amt', pct: '', amt: String(am[1] || 0) }, { mode: 'rest', pct: '', amt: '' }]; // ช่องที่ 3 = ส่วนที่เหลือเสมอ
     }
     state.shopUI.form = f;
   }
@@ -664,6 +796,7 @@
   function fillShopForm() {
     const f = state.shopUI.form;
     [['sDate', 'date'], ['sSales', 'sales'], ['sCost', 'cost'], ['sProfit', 'profit'], ['sNote', 'note']].forEach(([id, k]) => { const el = $('#' + id); if (el) el.value = f[k]; });
+    const sdi = $('#sDate'); if (sdi) syncDateLabel(sdi);
     updateShopForm();
   }
 
@@ -671,6 +804,7 @@
     const rows = [];
     state.shopDays.forEach((e) => { const a = entryAmounts(e)[i] || 0; if (a > 0) rows.push({ date: e.date, label: 'แบ่งจากกำไรร้านข้าว', amt: a, auto: true, pot: i }); });
     state.moves.filter((m) => m.pot === i).forEach((m) => rows.push({ date: m.date, label: m.note || (m.dir === 'in' ? 'โอนเข้า' : 'โอนออก'), amt: m.dir === 'in' ? m.amount : -m.amount, id: m.id }));
+    state.tx.filter((t) => t.type === 'expense' && t.pot === i).forEach((t) => rows.push({ date: t.date, label: 'จ่าย: ' + (t.description || t.category), amt: -t.amount, txid: t.id }));
     return rows.sort((a, b) => (a.date < b.date ? 1 : -1)).slice(0, 30);
   }
 
@@ -732,31 +866,31 @@
     const ledger = state.potOpen >= 0 ? potLedger(state.potOpen) : [];
 
     v.innerHTML = `
-      <div class="card" id="shopForm"><h2>🍚 จดยอดร้านข้าว</h2>
+      <div class="card c-shop" id="shopForm"><h2>🍚 จดยอดร้านข้าว</h2>
         <div class="fields">
-          <label class="f">วันที่<input type="date" id="sDate" value="${f.date}" data-input="shop-form" data-f="date"></label>
+          <div class="f"><span class="fl">วันที่</span>${dateField('sDate', f.date, 'data-input="shop-form" data-f="date"')}</div>
           <label class="f">ยอดขาย (บาท)<input id="sSales" class="money-in" inputmode="decimal" value="${esc(f.sales)}" data-input="shop-form" data-f="sales" placeholder="0"></label>
           <label class="f">ต้นทุน (บาท)<input id="sCost" class="money-in" inputmode="decimal" value="${esc(f.cost)}" data-input="shop-form" data-f="cost" placeholder="0"></label>
           <label class="f">กำไร (บาท)<input id="sProfit" class="money-in" inputmode="decimal" value="${esc(f.profit)}" data-input="shop-form" data-f="profit" placeholder="0"></label>
         </div>
-        <div class="splitlbl"><b>แบ่งกำไร</b><small class="muted">แก้ % หรือจำนวนเงินได้เลย อีกช่องคิดให้เอง</small></div>
+        <div class="splitlbl"><b>แบ่งกำไร</b><small class="muted">แก้ช่อง 1–2 ได้ทั้ง % และจำนวนเงิน ช่อง 3 คิดส่วนที่เหลือให้เอง</small></div>
         <div class="split2">${[0, 1, 2].map((i) => `<div class="srow2"><div class="sn">${esc(cfg.names[i])}</div>
-          <label class="inpp"><input id="spP${i}" inputmode="decimal" value="${showNum(sp.rows[i].pc)}" data-input="split" data-i="${i}" data-f="pct"><span>%</span></label>
-          <label class="inpa"><input id="spA${i}" inputmode="decimal" value="${showNum(sp.rows[i].a)}" data-input="split" data-i="${i}" data-f="amt"><span>฿</span></label></div>`).join('')}</div>
+          <label class="inpp"><input id="spP${i}" inputmode="decimal" value="${showNum(sp.rows[i].pc)}" data-input="split" data-i="${i}" data-f="pct" ${i === 2 ? 'readonly tabindex="-1"' : ''}><span>%</span></label>
+          <label class="inpa"><input id="spA${i}" inputmode="decimal" value="${showNum(sp.rows[i].a)}" data-input="split" data-i="${i}" data-f="amt" ${i === 2 ? 'readonly tabindex="-1"' : ''}><span>฿</span></label></div>`).join('')}</div>
         <div id="shopPrev">${shopPreviewHtml()}</div>
         <div class="fields one"><label class="f">หมายเหตุ (ไม่บังคับ)<input id="sNote" value="${esc(f.note)}" data-input="shop-form" data-f="note"></label></div>
         <button class="btn primary block" id="shopSaveBtn" data-act="shop-save">${existingShop(f.date) ? 'อัปเดต' : 'บันทึก'}ยอดวันที่ ${fmtD(f.date)}</button>
       </div>
 
-      <div class="card"><div class="pbar" style="margin-bottom:10px"><h2>เงินแต่ละกอง</h2><button class="btn sm primary" data-act="move-open" data-i="-1">+ เงินเข้า / ออก</button></div>
+      <div class="card c-pot"><div class="pbar" style="margin-bottom:10px"><h2>เงินแต่ละกอง</h2><button class="btn sm primary" data-act="move-open" data-i="-1">+ เงินเข้า / ออก</button></div>
         <div class="pots">${[0, 1, 2].map((i) => `<button class="pot ${state.potOpen === i ? 'on' : ''}" data-act="pot-open" data-i="${i}" style="--pc:var(--pot${i})"><span class="pn">${esc(cfg.names[i])}</span><b class="${ps[i].bal < 0 ? 'exp' : ''}">${money(ps[i].bal)}</b><small>เข้า ${money(ps[i].in)}<br>ออก ${money(ps[i].out)}</small></button>`).join('')}</div>
         <div class="potsum"><div><small>เงินเข้าทั้งหมด</small><b class="inc">${money(sumBy(ps, (x) => x.in))}</b></div><div><small>เงินออกทั้งหมด</small><b class="exp">${money(sumBy(ps, (x) => x.out))}</b></div><div><small>คงเหลือจริง</small><b>${money(sumBy(ps, (x) => x.bal))}</b></div></div>
         ${state.potOpen >= 0 ? `<div class="ledger"><div class="ledhead"><b>ประวัติ: ${esc(cfg.names[state.potOpen])}</b><button class="btn sm" data-act="move-open" data-i="${state.potOpen}">+ เข้า/ออก</button></div>
-          ${ledger.length ? ledger.map((x) => `<div class="irow lrw"><span>${fmtShort(x.date)} · ${esc(x.label)}</span><span class="num ${x.amt >= 0 ? 'inc' : 'exp'}">${x.amt >= 0 ? '+' : ''}${money(x.amt)}</span><span class="lbt">${x.id ? `<button class="icon tiny" data-act="move-edit" data-id="${x.id}" aria-label="แก้ไข">${ICON.edit}</button><button class="icon del tiny" data-act="move-del" data-id="${x.id}" aria-label="ลบ">${ICON.del}</button>` : `<button class="icon tiny" data-act="auto-edit" data-date="${x.date}" data-i="${x.pot}" aria-label="แก้ไข">${ICON.edit}</button><button class="icon del tiny" data-act="auto-del" data-date="${x.date}" data-i="${x.pot}" aria-label="ลบ">${ICON.del}</button>`}</span></div>`).join('')
+          ${ledger.length ? ledger.map((x) => `<div class="irow lrw"><span>${fmtShort(x.date)} · ${esc(x.label)}</span><span class="num ${x.amt >= 0 ? 'inc' : 'exp'}">${x.amt >= 0 ? '+' : ''}${money(x.amt)}</span><span class="lbt">${x.txid ? `<button class="icon tiny" data-act="tx-edit" data-id="${x.txid}" aria-label="แก้ไข">${ICON.edit}</button><button class="icon del tiny" data-act="tx-del" data-id="${x.txid}" aria-label="ลบ">${ICON.del}</button>` : x.id ? `<button class="icon tiny" data-act="move-edit" data-id="${x.id}" aria-label="แก้ไข">${ICON.edit}</button><button class="icon del tiny" data-act="move-del" data-id="${x.id}" aria-label="ลบ">${ICON.del}</button>` : `<button class="icon tiny" data-act="auto-edit" data-date="${x.date}" data-i="${x.pot}" aria-label="แก้ไข">${ICON.edit}</button><button class="icon del tiny" data-act="auto-del" data-date="${x.date}" data-i="${x.pot}" aria-label="ลบ">${ICON.del}</button>`}</span></div>`).join('')
           : '<div class="sidehint">ยังไม่มีรายการ</div>'}</div>` : ''}
       </div>
 
-      <div class="card"><div class="pbar" style="margin-bottom:6px"><h2>ทุนหมุนเวียน</h2><button class="btn sm" data-act="stock-open">จัดรายการซื้อของย้อนหลัง</button></div>
+      <div class="card c-cap"><div class="pbar" style="margin-bottom:6px"><h2>ทุนหมุนเวียน</h2><button class="btn sm" data-act="stock-open">จัดรายการซื้อของย้อนหลัง</button></div>
         <p class="lead">ดึงจากรายการหมวด “${STOCK}” · ทุนที่มี = ทุนตั้งต้น ${money(cap)} + ${esc(cfg.names[1])} ${money(ps[1].bal)}</p>
         ${capHtml}
         ${stockPeriod > 0 ? `<div class="chartwrap">${chart3}</div><div class="avgs"><div><small>ซื้อของช่วงนี้</small><b>${money(stockPeriod)}</b></div><div><small>ขายได้ต่อทุน 1 บาท</small><b class="inc">${salesPerBaht ? '฿' + salesPerBaht.toFixed(2) : '–'}</b></div></div>` : ''}
@@ -769,14 +903,14 @@
         <div class="kpi accent"><span>กำไร</span><b>${money(profit)}</b><small>${sales > 0 ? pct(profit, sales) + '% ของยอดขาย' : ''}</small></div>
         <div class="kpi"><span>ต้นทุนที่แท้จริง</span><b>${money(sales - profit)}</b><small>ยอดขาย − กำไร</small></div>
       </div>
-      <div class="card"><h2>การแบ่งกำไรช่วงนี้</h2>
+      <div class="card c-pot"><h2>การแบ่งกำไรช่วงนี้</h2>
         <div class="split">${[0, 1, 2].map((i) => `<div class="srow"><div>${esc(cfg.names[i])}</div><b>${money(parts[i])}</b></div>`).join('')}</div></div>
-      <div class="card"><h2>ยอดขาย ต้นทุน กำไร</h2><p class="lead">${u.mode === 'day' ? '7 วันล่าสุด' : u.mode === 'year' ? 'รายเดือน' : 'รายวัน'}</p>
+      <div class="card c-shop"><h2>ยอดขาย ต้นทุน กำไร</h2><p class="lead">${u.mode === 'day' ? '7 วันล่าสุด' : u.mode === 'year' ? 'รายเดือน' : 'รายวัน'}</p>
         <div class="chips" style="margin-bottom:10px">${active.map((s) => `<button class="chip ${u.series[s.key] ? 'on' : ''}" data-act="shop-ser" data-v="${s.key}">${s.name}</button>`).join('')}</div>
         ${chart1}</div>
-      <div class="card"><h2>รายวัน</h2>${cur.length ? `<div class="tblwrap"><table class="shoptbl"><thead><tr><th>วันที่</th><th>ยอดขาย</th><th>ต้นทุน</th><th>กำไร</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>` : '<div class="empty"><div class="big">🍚</div>ยังไม่มียอดในช่วงนี้</div>'}</div>
+      <div class="card c-shop"><h2>รายวัน</h2>${cur.length ? `<div class="tblwrap"><table class="shoptbl"><thead><tr><th>วันที่</th><th>ยอดขาย</th><th>ต้นทุน</th><th>กำไร</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>` : '<div class="empty"><div class="big">🍚</div>ยังไม่มียอดในช่วงนี้</div>'}</div>
 
-      <details class="card"><summary>⚙️ ตั้งค่าเริ่มต้นการแบ่งกำไรและทุน</summary>
+      <details class="card c-set"><summary>⚙️ ตั้งค่าเริ่มต้นการแบ่งกำไรและทุน</summary>
         <p class="lead">ค่าตั้งต้นของ % ตอนจดยอดใหม่ (วันไหนอยากเปลี่ยน แก้ในฟอร์มด้านบนได้เลย) ส่วนที่ 3 คือส่วนที่เหลือ</p>
         ${[0, 1, 2].map((i) => `<div class="fields" style="grid-template-columns:1fr 110px">
           <label class="f">ชื่อส่วนที่ ${i + 1}<input id="aName${i}" value="${esc(cfg.names[i])}"></label>
@@ -860,21 +994,21 @@
     v.innerHTML = `
       ${periodBar('ana', a, { modes: ['month', 'year'], noToday: false })}
       <div class="kpis">
-        <div class="kpi"><span>รายรับ</span><b class="inc">${money(inc)}</b>${dTxt(delta(inc, pinc), false)}</div>
-        <div class="kpi"><span>รายจ่าย</span><b class="exp">${money(exp)}</b>${dTxt(dExp, true)}</div>
+        <div class="kpi k-inc"><span>รายรับ</span><b class="inc">${money(inc)}</b>${dTxt(delta(inc, pinc), false)}</div>
+        <div class="kpi k-exp"><span>รายจ่าย</span><b class="exp">${money(exp)}</b>${dTxt(dExp, true)}</div>
         <div class="kpi accent"><span>คงเหลือในมือ</span><b>${money(inc - exp)}</b><small>${nDays > 0 ? 'จ่ายเฉลี่ย ' + money(exp / nDays) + '/วัน' : ''}</small></div>
       </div>
-      <div class="card"><h2>ข้อสังเกต</h2><div class="tips">${tips.map((t) => `<div class="tip">💡 ${esc(t)}</div>`).join('')}</div></div>
-      <div class="card"><h2>หมวดรายจ่าย เทียบช่วงก่อน</h2>
+      <div class="card c-ana"><h2>ข้อสังเกต</h2><div class="tips">${tips.map((t) => `<div class="tip">💡 ${esc(t)}</div>`).join('')}</div></div>
+      <div class="card c-exp"><h2>หมวดรายจ่าย เทียบช่วงก่อน</h2>
         ${cl.length ? cl.map(([name, val]) => { const p = pm.get(name) || 0, dd = delta(val, p); return `<div class="lrow"><div class="nm"><i class="sw" style="background:${catInfo(name, 'expense').color}"></i><span>${esc(catInfo(name, 'expense').emoji)} ${esc(name)}</span></div><div class="num">${money(val)} ${dd === null ? '' : `<span class="pc ${dd > 0 ? 'exp' : 'inc'}">${dd > 0 ? '▲' : '▼'}${Math.abs(dd)}%</span>`}</div><div class="bar"><i style="width:${(val / cmax) * 100}%;background:${catInfo(name, 'expense').color}"></i></div></div>`; }).join('') : '<div class="empty slim">ยังไม่มีรายจ่ายในช่วงนี้</div>'}
       </div>
-      <div class="card"><h2>ใช้จ่ายแต่ละวันในสัปดาห์</h2><p class="lead">ค่าเฉลี่ยต่อวัน · แตะแท่งเพื่อดูค่า</p>${wChart}</div>
+      <div class="card c-chart"><h2>ใช้จ่ายแต่ละวันในสัปดาห์</h2><p class="lead">ค่าเฉลี่ยต่อวัน · แตะแท่งเพื่อดูค่า</p>${wChart}</div>
       <div class="grid2">
-        <div class="card"><h2>รายจ่ายก้อนใหญ่ 5 อันดับ</h2>${top5.length ? top5.map((t) => txRow(t, true)).join('') : '<div class="empty slim">ยังไม่มีข้อมูล</div>'}</div>
-        <div class="card"><h2>สัดส่วนตามคน</h2>${pl.length ? pl.map(([k, val]) => `<div class="lrow"><div class="nm"><span>👤 ${esc(k)}</span></div><div class="num">${money(val)}<span class="pc">${pct(val, exp)}%</span></div><div class="bar"><i style="width:${pct(val, exp)}%;background:var(--accent)"></i></div></div>`).join('') : '<div class="empty slim">ยังไม่มีข้อมูล</div>'}</div>
+        <div class="card c-exp"><h2>รายจ่ายก้อนใหญ่ 5 อันดับ</h2>${top5.length ? top5.map((t) => txRow(t, true)).join('') : '<div class="empty slim">ยังไม่มีข้อมูล</div>'}</div>
+        <div class="card c-person"><h2>สัดส่วนตามคน</h2>${pl.length ? pl.map(([k, val]) => `<div class="lrow"><div class="nm"><span>👤 ${esc(k)}</span></div><div class="num">${money(val)}<span class="pc">${pct(val, exp)}%</span></div><div class="bar"><i style="width:${pct(val, exp)}%;background:var(--accent)"></i></div></div>`).join('') : '<div class="empty slim">ยังไม่มีข้อมูล</div>'}</div>
       </div>
       <div class="sp"></div>
-      <div class="card"><h2>ร้านข้าว</h2>${sh.length ? `<div class="kpis four" style="margin-bottom:0">
+      <div class="card c-shop"><h2>ร้านข้าว</h2>${sh.length ? `<div class="kpis four" style="margin-bottom:0">
         <div class="kpi"><span>กำไรรวม</span><b>${money(sProfit)}</b>${dTxt(delta(sProfit, pProfit), false)}</div>
         <div class="kpi"><span>กำไรเฉลี่ย/วัน</span><b>${money(sProfit / sh.length)}</b><small>${sh.length} วันที่จด</small></div>
         <div class="kpi"><span>กำไรต่อยอดขาย</span><b>${sSales > 0 ? pct(sProfit, sSales) + '%' : '–'}</b></div>
@@ -911,11 +1045,11 @@
     const ec = catsOf('expense').length, ic = catsOf('income').length;
     v.innerHTML = `<div class="accs">
       ${acc('greet', '👋', 'ข้อความต้อนรับ', 'แสดงใต้ชื่อแอพ', `<label class="f">ข้อความ (เว้นว่างได้ ถ้าไม่ต้องการ)<input id="greetIn" maxlength="60" value="${esc(state.settings.greeting == null ? 'ขอให้เป็นวันที่ดีนะ' : state.settings.greeting)}" data-change="greeting" placeholder="เช่น ขอให้เป็นวันที่ดี"></label><p class="hint">ตัวอย่างที่จะแสดง: ${greeting()}</p>`)}
-      ${acc('theme', '🎨', 'ธีม', esc(cur.name), themeBody)}
-      ${acc('people', '👨‍👩‍👧', 'คนในครอบครัว', `${(state.settings.people || []).length} คน`, peopleBody)}
+      ${acc('theme', '🎨', 'ธีม', esc(cur.name), themeBody, 'ca-0')}
+      ${acc('people', '👨‍👩‍👧', 'คนในครอบครัว', `${(state.settings.people || []).length} คน`, peopleBody, 'ca-2')}
       ${acc('catExp', '🔻', 'หมวดรายจ่าย', `${ec} หมวด`, `<p class="lead">แตะหมวดเพื่อแก้คำสำคัญ ระบบใช้คำเหล่านี้แยกหมวดตอนพิมพ์หลายรายการ</p>` + catBlock('expense'), 'exp-acc')}
       ${acc('catInc', '🔺', 'หมวดรายรับ', `${ic} หมวด`, `<p class="lead">แตะหมวดเพื่อแก้คำสำคัญ</p>` + catBlock('income'), 'inc-acc')}
-      ${acc('data', '💾', 'ข้อมูล', DB.live ? 'Supabase' : 'โหมดทดลอง', dataBody)}
+      ${acc('data', '💾', 'ข้อมูล', DB.live ? 'Supabase' : 'โหมดทดลอง', dataBody, 'ca-3')}
       <div class="foot"><button class="btn sm danger ghost" data-act="cat-reset">คืนค่าหมวดหมู่เริ่มต้น</button></div></div>`;
   }
   function exportCsv(kind) {
@@ -993,7 +1127,7 @@
       case 'person-toggle': if (state.personOpen.has(v)) state.personOpen.delete(v); else state.personOpen.add(v); render(true); break;
       case 'add-chip': state.add.person = state.add.person === v ? '' : v; reparse(); render(true); break;
       case 'add-help': state.add.help = !state.add.help; render(true); break;
-      case 'row-type': { const r = state.add.rows[i]; if (r.type !== v) { r.type = v; const c = P.classify(r.desc, cats(), v); r.category = c ? c.name : P.FALLBACK[v]; } renderPreview(); break; }
+      case 'row-type': { const r = state.add.rows[i]; if (r.type !== v) { r.type = v; const c = P.classify(r.desc, cats(), v); r.category = c ? c.name : P.FALLBACK[v]; } r.pot = resolvePot(r); renderPreview(); break; }
       case 'row-del': state.add.rows.splice(i, 1); renderPreview(); break;
       case 'add-save': saveAdd(el); break;
       case 'list-toggle': { const d = el.dataset.date; if (state.list.open.has(d)) state.list.open.delete(d); else state.list.open.add(d); $('#listBody').innerHTML = listBodyHtml(); break; }
@@ -1072,12 +1206,29 @@
         break;
       }
       case 'pot-view': state.dash.potView = v; render(true); break;
+      case 'd-open': {
+        if (Date.now() - (state.swipedAt || 0) < 500) break;
+        const inp = $('#' + el.dataset.t);
+        if (!inp) break;
+        try { inp.showPicker(); } catch (er) { inp.style.pointerEvents = 'auto'; inp.focus(); inp.click(); }
+        break;
+      }
+      case 'd-step': { const inp = $('#' + el.dataset.t); if (inp) setDate(inp, addDays(inp.value || today(), Number(el.dataset.d))); break; }
+      case 'card-add': openCard(null); break;
+      case 'card-quick': openCard(null, { name: el.dataset.n, emoji: el.dataset.e, src: el.dataset.src }); break;
+      case 'card-edit': openCard(el.dataset.id); break;
+      case 'card-save': saveCard(); break;
+      case 'card-del': if (confirm('ลบการ์ดนี้?')) { state.settings.cards = (state.settings.cards || []).filter((c) => c.id !== state.cardEdit); saveSetting('cards'); closeModal(); render(true); } break;
+      case 'adj-open': openAdjust(); break;
+      case 'adj-save': saveAdjust(false); break;
+      case 'adj-clear': saveAdjust(true); break;
       default: break;
     }
   });
 
   document.addEventListener('input', (e) => {
     const el = e.target, kind = el.dataset.input;
+    if (el.classList && el.classList.contains('dhid')) syncDateLabel(el);
     if (!kind) return;
     if (kind === 'add-text') { state.add.text = el.value; reparse(); renderPreview(); }
     else if (kind === 'add-date') { state.add.date = el.value || today(); reparse(); renderPreview(); }
@@ -1086,7 +1237,14 @@
       const r = state.add.rows[Number(el.dataset.i)], f = el.dataset.f;
       if (!r) return;
       if (f === 'amount') { r.amount = num(el.value); const s = $('#sumline'); if (s) s.innerHTML = sumLine(); }
-      else r[f] = el.value;
+      else {
+        r[f] = el.value;
+        if (f === 'person' && state.add.potMode === 'auto') {
+          r.pot = resolvePot(r);
+          const ps = el.closest('.prow') && el.closest('.prow').querySelector('[data-f="pot"]');
+          if (ps) ps.value = r.pot == null ? '' : String(r.pot);
+        }
+      }
     } else if (kind === 'list-q') { state.list.q = el.value; $('#listBody').innerHTML = listBodyHtml(); }
     else if (kind === 'shop-form') {
       const f = el.dataset.f;
@@ -1112,13 +1270,24 @@
     if (kind === 'dash-person') { state.dash.person = el.value; state.sel = {}; render(true); }
     else if (kind === 'list-person') { state.list.person = el.value; render(true); }
     else if (kind === 'list-cat') { state.list.cat = el.value; render(true); }
-    else if (kind === 'row') { const r = state.add.rows[Number(el.dataset.i)]; if (r) { r[el.dataset.f] = el.value; if (el.dataset.f === 'category') { const pr = el.closest('.prow'); if (pr) pr.style.setProperty('--rc', catInfo(el.value, r.type).color); } } }
+    else if (kind === 'add-potmode') { state.add.potMode = el.value; reparse(); renderPreview(); }
+    else if (kind === 'row') { const r = state.add.rows[Number(el.dataset.i)]; if (r) { if (el.dataset.f === 'pot') r.pot = el.value === '' ? null : Number(el.value); else r[el.dataset.f] = el.value; if (el.dataset.f === 'category') { const pr = el.closest('.prow'); if (pr) pr.style.setProperty('--rc', catInfo(el.value, r.type).color); } } }
     else if (kind === 'greeting') { state.settings.greeting = el.value.trim(); saveSetting('greeting'); renderTabs(); toast('บันทึกข้อความแล้ว ✓'); }
     else if (kind === 'cat-kw') {
       const list = cats().map((c) => Object.assign({}, c)), c = list[Number(el.dataset.i)];
       if (c) { c.keywords = el.value.split(/[,\n،]/).map((s) => s.trim()).filter(Boolean); state.settings.categories = list; saveSetting('categories'); toast('บันทึกคำสำคัญแล้ว ✓'); }
     }
   });
+
+  // ปัดซ้าย/ขวาที่ช่องวันที่ = เลื่อนวัน
+  let swp = null;
+  document.addEventListener('touchstart', (e) => { const b = e.target.closest && e.target.closest('.dshow'); swp = b ? { x: e.touches[0].clientX, y: e.touches[0].clientY, t: b.dataset.t } : null; }, { passive: true });
+  document.addEventListener('touchend', (e) => {
+    if (!swp) return;
+    const t = e.changedTouches[0], dx = t.clientX - swp.x, dy = t.clientY - swp.y, id = swp.t;
+    swp = null;
+    if (Math.abs(dx) > 40 && Math.abs(dx) > Math.abs(dy) * 1.5) { const inp = $('#' + id); if (inp) { state.swipedAt = Date.now(); setDate(inp, addDays(inp.value || today(), dx < 0 ? 1 : -1)); } }
+  }, { passive: true });
 
   window.addEventListener('hashchange', route);
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeModal(); });
@@ -1136,6 +1305,8 @@
     if (s.alloc) st.alloc = s.alloc;
     if (s.capital != null) st.capital = Number(s.capital) || 0;
     if (s.capDays != null) st.capDays = Number(s.capDays) || 7;
+    if (s.cashAdj != null) st.cashAdj = Number(s.cashAdj) || 0;
+    if (Array.isArray(s.cards)) st.cards = s.cards;
     if (typeof s.greeting === 'string') st.greeting = s.greeting;
     state.shopUI.form = null;
     T.apply(st.theme);
@@ -1145,6 +1316,7 @@
     try {
       const d = await DB.loadAll();
       state.tx = d.tx; state.shopDays = d.shop; state.moves = d.moves || []; applySettings(d.settings || {});
+      if (d.potMissing) setTimeout(() => toast('ยังไม่ได้เพิ่มคอลัมน์ “จ่ายจากกอง” — รันไฟล์ supabase/update-pot.sql หนึ่งครั้ง', true), 1600);
       if (d.movesMissing) setTimeout(() => toast('ยังไม่มีตาราง pot_moves — รัน supabase/schema.sql ใหม่เพื่อใช้ระบบเงินเข้า/ออก', true), 800);
     } catch (e) {
       console.error(e);
