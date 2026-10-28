@@ -17,6 +17,7 @@
   const num = (x) => Number(x) || 0;
 
   const normTx = (r) => ({ id: r.id, date: String(r.date).slice(0, 10), type: r.type, amount: num(r.amount), category: r.category || '', description: r.description || '', person: r.person || '' });
+  const normMove = (r) => ({ id: r.id, date: String(r.date).slice(0, 10), pot: Number(r.pot) || 0, dir: r.direction || r.dir, amount: num(r.amount), note: r.note || '' });
   const normShop = (r) => ({ id: r.id, date: String(r.date).slice(0, 10), sales: num(r.sales), cost: num(r.cost), profit: num(r.profit), note: r.note || '', alloc: r.alloc && r.alloc.amounts ? r.alloc : null });
 
   async function fetchAll(table) {
@@ -35,17 +36,18 @@
     live,
     async loadAll() {
       if (live) {
-        const [tx, shop, st] = await Promise.all([
+        const [tx, shop, st, mv] = await Promise.all([
           fetchAll('transactions'),
           fetchAll('shop_days'),
           sb.from('app_settings').select('*'),
+          fetchAll('pot_moves').catch(() => null), // ถ้ายังไม่ได้สร้างตารางนี้ แอพยังใช้ได้
         ]);
         if (st.error) throw st.error;
         const settings = {};
         (st.data || []).forEach((r) => { settings[r.key] = r.value; });
-        return { tx: tx.map(normTx), shop: shop.map(normShop), settings };
+        return { tx: tx.map(normTx), shop: shop.map(normShop), moves: (mv || []).map(normMove), movesMissing: mv === null, settings };
       }
-      return { tx: LS.get('tx', []).map(normTx), shop: LS.get('shop', []).map(normShop), settings: LS.get('settings', {}) };
+      return { tx: LS.get('tx', []).map(normTx), shop: LS.get('shop', []).map(normShop), moves: LS.get('moves', []).map(normMove), settings: LS.get('settings', {}) };
     },
 
     async addTx(rows) {
@@ -101,6 +103,26 @@
         return;
       }
       LS.set('shop', LS.get('shop', []).filter((r) => r.id !== id));
+    },
+
+    async addMove(row) {
+      const payload = { date: row.date, pot: row.pot, direction: row.dir, amount: row.amount, note: row.note || '' };
+      if (live) {
+        const { data, error } = await sb.from('pot_moves').insert(payload).select();
+        if (error) throw error;
+        return normMove(data[0]);
+      }
+      const made = normMove(Object.assign({ id: uid() }, payload));
+      LS.set('moves', LS.get('moves', []).concat(made));
+      return made;
+    },
+    async deleteMove(id) {
+      if (live) {
+        const { error } = await sb.from('pot_moves').delete().eq('id', id);
+        if (error) throw error;
+        return;
+      }
+      LS.set('moves', LS.get('moves', []).filter((r) => r.id !== id));
     },
 
     async setSetting(key, value) {

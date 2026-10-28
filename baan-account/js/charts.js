@@ -17,6 +17,16 @@
     return n * p;
   }
 
+
+  // ป้ายลอยบอกค่า ณ แท่ง/จุดที่เลือก
+  function tipSvg(W, cx, yTop, lines) {
+    const w = Math.max(...lines.map((l) => l.length)) * 6.6 + 20, h = lines.length * 16 + 10;
+    const x = Math.max(2, Math.min(W - w - 2, cx - w / 2));
+    const y = Math.max(2, yTop - h - 8);
+    return `<g class="c-tipg"><rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${w.toFixed(1)}" height="${h}" rx="10" class="c-tipbg"/>` +
+      lines.map((l, i) => `<text x="${(x + 10).toFixed(1)}" y="${(y + 18 + i * 16).toFixed(1)}" class="c-tip${i === 0 ? ' c-tip0' : ''}">${esc(l)}</text>`).join('') + '</g>';
+  }
+
   // กราฟแท่งแบบกลุ่ม series: [{name,color,values}]
   function bars(o) {
     const labels = o.labels, series = o.series;
@@ -34,6 +44,7 @@
         `<text x="${padL - 6}" y="${yy + 3.5}" text-anchor="end" class="c-ax">${compact(v)}</text>`;
     }
     const k = series.length;
+    let topY = padT + ih;
     const bw = Math.min(18, (gw * 0.72) / k);
     const bundle = bw * k + (k - 1) * 2;
     let body = '';
@@ -44,12 +55,14 @@
       series.forEach((s) => {
         const v = s.values[i] || 0;
         const h = Math.max(v > 0 ? 2 : 0, (v / max) * ih);
+        if (i === o.sel && h > 0) topY = Math.min(topY, padT + ih - h);
         if (h > 0) body += `<rect x="${bx.toFixed(1)}" y="${(padT + ih - h).toFixed(1)}" width="${bw.toFixed(1)}" height="${h.toFixed(1)}" rx="${Math.min(5, bw / 2).toFixed(1)}" style="fill:${s.color}"/>`;
         bx += bw + 2;
       });
       body += `<text x="${x0 + gw / 2}" y="${H - 9}" text-anchor="middle" class="c-ax">${esc(lb)}</text>`;
       body += `<rect x="${x0}" y="0" width="${gw}" height="${H}" fill="transparent" data-idx="${i}" class="c-hit"/>`;
     });
+    if (o.tip && o.sel >= 0 && o.sel < labels.length) body += tipSvg(W, padL + gw * o.sel + gw / 2, topY, o.tip(o.sel));
     return `<svg class="chart" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img">${g}${body}</svg>`;
   }
 
@@ -75,9 +88,11 @@
       if (i === o.sel) body += `<rect x="${padL + gw * i + 1}" y="${padT}" width="${gw - 2}" height="${ih}" rx="8" class="c-sel"/>`;
       body += `<text x="${x(i)}" y="${H - 9}" text-anchor="middle" class="c-ax">${esc(lb)}</text>`;
     });
+    let topY = padT + ih;
     series.forEach((s, si) => {
       const pts = s.values.map((v, i) => [x(i), y(v || 0)]);
       if (!pts.length) return;
+      if (o.sel >= 0 && pts[o.sel]) topY = Math.min(topY, pts[o.sel][1]);
       const d = pts.map((p, i) => (i ? 'L' : 'M') + p[0].toFixed(1) + ' ' + p[1].toFixed(1)).join(' ');
       if (si === 0 && o.area !== false) {
         body += `<path d="${d} L${pts[pts.length - 1][0].toFixed(1)} ${padT + ih} L${pts[0][0].toFixed(1)} ${padT + ih} Z" style="fill:${s.color};opacity:.12"/>`;
@@ -88,6 +103,7 @@
       });
     });
     labels.forEach((lb, i) => { body += `<rect x="${padL + gw * i}" y="0" width="${gw}" height="${H}" fill="transparent" data-idx="${i}" class="c-hit"/>`; });
+    if (o.tip && o.sel >= 0 && o.sel < labels.length) body += tipSvg(W, x(o.sel), topY, o.tip(o.sel));
     return `<svg class="chart" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img">${g}${body}</svg>`;
   }
 
