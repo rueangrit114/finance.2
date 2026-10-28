@@ -6,7 +6,6 @@
   /* ---------- ค่าคงที่ / ตัวช่วย ---------- */
   const STOCK = 'ซื้อของเข้าร้าน';
   const SALARY = 'เงินเดือน';
-  const FAM = 3; // จ่ายจาก “เงินเดือน (ครอบครัว)” แยกจากทุนร้าน
   const MONTHS = ['มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน', 'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม'];
   const MONTHS_S = ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'];
   const WD = ['อาทิตย์', 'จันทร์', 'อังคาร', 'พุธ', 'พฤหัสบดี', 'ศุกร์', 'เสาร์'];
@@ -184,7 +183,9 @@
     inp.value = val; syncDateLabel(inp);
     inp.dispatchEvent(new Event('input', { bubbles: true }));
   }
-  const potOpts = (sel) => opt('', 'เงินในมือ', sel == null) + allocCfg().names.map((n, i) => opt(i, n, sel === i)).join('') + opt(FAM, 'เงินเดือน (ครอบครัว)', sel === FAM);
+  const parsePot = (v) => (v === '' || v == null ? null : /^\d+$/.test(String(v)) ? Number(v) : String(v));
+  const walletCards = () => (state.settings.cards || []).filter((c) => c.wallet && String(c.src).startsWith('inc|'));
+  const potOpts = (sel) => opt('', 'เงินในมือ', sel == null) + allocCfg().names.map((n, i) => opt(i, n, sel === i)).join('') + walletCards().map((c) => opt('c:' + c.id, c.emoji + ' ' + c.name, sel === 'c:' + c.id)).join('');
 
   /* ---------- แถวรายการ ---------- */
   function txRow(t, compact) {
@@ -219,8 +220,14 @@
     state.tx.forEach((t) => { if (t.type === 'expense' && t.pot != null && s[t.pot]) s[t.pot].spend += t.amount; }); // จ่ายจากกองตอนจดรายการ
     return s.map((x) => ({ auto: round2(x.auto), manIn: round2(x.manIn), out: round2(x.out + x.spend), in: round2(x.auto + x.manIn), bal: round2(x.auto + x.manIn - x.out - x.spend) }));
   }
-  // เงินเดือน/ครอบครัว แยกจากทุนร้าน: รายรับหมวดเงินเดือน และรายจ่ายที่เลือก “จ่ายจากเงินเดือน”
-  const isFam = (t) => (t.type === 'income' ? t.category === SALARY : t.pot === FAM);
+  // การ์ดกระเป๋าเงิน (เช่น เงินเดือนบอล) แยกจากทุนร้าน: รายรับที่การ์ดนับ และรายจ่ายที่เลือก “จ่ายจากการ์ด”
+  const matchSrc = (c, t) => { const [k, a, b] = String(c.src).split('|'); if (k !== 'inc' || t.type !== 'income') return false; return a === 'cat' ? t.category === b : a === 'person' ? t.person === b : true; };
+  const isFam = (t) => (t.type === 'income' ? walletCards().some((c) => matchSrc(c, t)) : typeof t.pot === 'string' && t.pot.startsWith('c:'));
+  function walletCalc(c) {
+    const inn = sumBy(state.tx.filter((t) => matchSrc(c, t)), (t) => t.amount);
+    const out = sumBy(state.tx.filter((t) => t.type === 'expense' && t.pot === 'c:' + c.id), (t) => t.amount);
+    return { inn: round2(inn), out: round2(out), bal: round2(inn - out) };
+  }
   function capCalc(from, to) {
     const l = inRange(state.tx, from, to).filter((t) => !isFam(t));
     const hand = round2(total(l, 'income') - total(l, 'expense'));
@@ -233,12 +240,6 @@
     const adj = from <= '0000-01-01' ? (Number(state.settings.cashAdj) || 0) : 0;
     return { hand, adj, psx, bal, potSum, free: round2(hand + adj - potSum) };
   }
-  function famCalc(from, to) {
-    const l = inRange(state.tx, from, to);
-    const inn = sumBy(l.filter((t) => t.type === 'income' && t.category === SALARY), (t) => t.amount);
-    const out = sumBy(l.filter((t) => t.type === 'expense' && t.pot === FAM), (t) => t.amount);
-    return { inn: round2(inn), out: round2(out), bal: round2(inn - out) };
-  }
   const ALL_FROM = '0000-01-01', ALL_TO = '9999-12-31';
 
   /* การ์ดของฉัน (กำหนดเองในหน้าสรุป) */
@@ -247,15 +248,15 @@
     const ppl = knownPeople(), nm = allocCfg().names;
     return g('รายรับ', [['inc|all', 'รายรับทั้งหมด'], ...catsOf('income').map((c) => ['inc|cat|' + c.name, 'หมวด ' + c.name]), ...ppl.map((p) => ['inc|person|' + p, 'ของ ' + p])]) +
       g('รายจ่าย', [['exp|all', 'รายจ่ายทั้งหมด'], ...catsOf('expense').map((c) => ['exp|cat|' + c.name, 'หมวด ' + c.name]), ...ppl.map((p) => ['exp|person|' + p, 'ของ ' + p])]) +
-      g('ยอดคงเหลือ', [['free', 'ทุนที่เหลือรวม'], ...nm.map((n, i) => ['pot|' + i, 'กอง ' + n]), ['fam', 'เงินเดือน (ครอบครัว)']]);
+      g('ยอดคงเหลือ', [['free', 'ทุนที่เหลือรวม'], ...nm.map((n, i) => ['pot|' + i, 'กอง ' + n])]);
   }
   function cardValue(c) {
     const r = range(state.dash.mode, state.dash.anchor);
     const list = c.scope === 'all' ? state.tx : inRange(state.tx, r.from, r.to);
     const [kind, a, b] = String(c.src).split('|');
+    if (c.wallet && kind === 'inc') { const w = walletCalc(c); return { v: w.bal, bal: true, sub: `คงเหลือ · รับ ${money(w.inn)} จ่าย ${money(w.out)}` }; }
     if (kind === 'free') return { v: capCalc(ALL_FROM, ALL_TO).free, bal: true, sub: 'ทุนที่เหลือรวม' };
     if (kind === 'pot') return { v: potStats()[Number(a)].bal, bal: true, sub: 'คงเหลือในกอง' };
-    if (kind === 'fam') return { v: famCalc(ALL_FROM, ALL_TO).bal, bal: true, sub: 'คงเหลือ' };
     const type = kind === 'inc' ? 'income' : 'expense';
     let l = list.filter((t) => t.type === type);
     if (a === 'cat') l = l.filter((t) => t.category === b); else if (a === 'person') l = l.filter((t) => t.person === b);
@@ -273,13 +274,15 @@
       <div class="fields one"><label class="f">ให้นับอะไร<select id="cdSrc">${cardSrcOptions(c.src)}</select></label></div>
       <div class="fields"><label class="f">ช่วงเวลา<select id="cdScope">${opt('period', 'ตามช่วงที่เลือกด้านบน', c.scope !== 'all')}${opt('all', 'ทั้งหมด', c.scope === 'all')}</select></label>
         <label class="f">สี<input type="color" id="cdColor" value="${esc(c.color)}"></label></div>
-      <p class="hint">ถ้าเลือก “ยอดคงเหลือ” ระบบแสดงยอดสะสมเสมอ ไม่ขึ้นกับช่วงเวลา</p>
+      <label class="chk" id="cdWalletWrap" ${String(c.src).startsWith('inc|') ? '' : 'hidden'}><input type="checkbox" id="cdWallet" ${c.wallet ? 'checked' : ''}><span>ใช้จ่ายจากการ์ดนี้ได้ (เป็นกระเป๋าเงิน) — จะขึ้นในช่อง “จ่ายจาก” ตอนจดรายการ ยอดคงเหลือ = รายรับที่นับ − รายจ่ายที่จ่ายจากการ์ดนี้ ไม่ปนกับทุนร้าน</span></label>
+      <p class="hint">ถ้าเลือก “ยอดคงเหลือ” หรือเป็นกระเป๋าเงิน ระบบแสดงยอดสะสมเสมอ ไม่ขึ้นกับช่วงเวลา</p>
       <div class="actions">${old ? '<button class="btn danger" data-act="card-del">ลบการ์ด</button>' : '<button class="btn" data-act="modal-close">ยกเลิก</button>'}<button class="btn primary" data-act="card-save">บันทึก</button></div>`);
+    $('#cdSrc').addEventListener('change', () => { $('#cdWalletWrap').hidden = !$('#cdSrc').value.startsWith('inc|'); });
   }
   function saveCard() {
     const name = $('#cdName').value.trim();
     if (!name) return toast('ตั้งชื่อการ์ดก่อน', true);
-    const c = { id: state.cardEdit || 'c' + Date.now().toString(36), name, emoji: $('#cdEmoji').value.trim() || '⭐', color: $('#cdColor').value, src: $('#cdSrc').value, scope: $('#cdScope').value };
+    const c = { id: state.cardEdit || 'c' + Date.now().toString(36), name, emoji: $('#cdEmoji').value.trim() || '⭐', color: $('#cdColor').value, src: $('#cdSrc').value, scope: $('#cdScope').value, wallet: $('#cdSrc').value.startsWith('inc|') && $('#cdWallet').checked };
     const list = (state.settings.cards || []).slice(), i = list.findIndex((x) => x.id === c.id);
     if (i >= 0) list[i] = c; else list.push(c);
     state.settings.cards = list; saveSetting('cards'); closeModal(); toast('บันทึกการ์ดแล้ว ✓'); render(true);
@@ -430,12 +433,10 @@
       </div>` : ''}</div>` : '';
 
     // เงินเดือน (ครอบครัว) + การ์ดของฉัน
-    const fam = famCalc(ALL_FROM, ALL_TO), famP = famCalc(r.from, r.to);
     const cards = state.settings.cards || [];
     const quick = [['ซื้อของเข้าร้าน', '🌾', 'exp|cat|' + STOCK], ['รายจ่ายทั้งหมด', '💸', 'exp|all'], ...(knownPeople()[0] ? [['รายจ่าย ' + knownPeople()[0], '👤', 'exp|person|' + knownPeople()[0]]] : [])];
     const mine = `<div class="card c-mine"><div class="pbar" style="margin-bottom:10px"><h2>การ์ดของฉัน</h2><button class="btn sm" data-act="card-add">+ เพิ่มการ์ด</button></div>
       <div class="mycards">
-        ${fam.inn || fam.out ? `<div class="mycard" style="--ca:#3c8fd0"><span>💼 เงินเดือน (ครอบครัว)</span><b class="${fam.bal < 0 ? 'exp' : ''}">${money(fam.bal)}</b><small>คงเหลือ · ช่วงนี้รับ ${money(famP.inn)} จ่าย ${money(famP.out)}</small></div>` : ''}
         ${cards.map((c) => { const x = cardValue(c); return `<button class="mycard" style="--ca:${esc(c.color)}" data-act="card-edit" data-id="${c.id}"><span>${esc(c.emoji)} ${esc(c.name)}</span><b class="${x.bal ? (x.v < 0 ? 'exp' : '') : x.type === 'income' ? 'inc' : 'exp'}">${money(x.v)}</b><small>${esc(x.sub)}</small></button>`; }).join('')}
       </div>
       ${!cards.length ? `<p class="hint" style="margin:10px 0 8px">เพิ่มการ์ดที่อยากเห็นเอง เช่น</p><div class="chips tight">${quick.map(([n, em, src]) => `<button class="chip" data-act="card-quick" data-n="${esc(n)}" data-e="${em}" data-src="${esc(src)}">+ ${esc(n)}</button>`).join('')}</div>` : ''}
@@ -484,7 +485,7 @@
     const m = state.add.potMode;
     if (m === 'hand') return null;
     if (m === 'auto') { const p = (r.person || '').trim(), i = p ? allocCfg().names.indexOf(p) : -1; return i >= 0 ? i : null; }
-    return Number(m);
+    return parsePot(m);
   }
   function viewAdd(v) {
     const a = state.add;
@@ -496,7 +497,9 @@
         </div>
         <datalist id="peopleDL">${knownPeople().map((p) => `<option value="${esc(p)}">`).join('')}</datalist>
         ${knownPeople().length ? `<div class="chips tight">${knownPeople().map((p) => `<button class="chip ${a.person === p ? 'on' : ''}" data-act="add-chip" data-v="${esc(p)}">${esc(p)}</button>`).join('')}</div>` : ''}
-        ${DB.hasPot ? `<label class="f paysrc">จ่ายจาก (ใช้กับรายจ่ายทั้งชุด)<select data-change="add-potmode">${opt('auto', 'อัตโนมัติ (ชื่อตรงกับกอง = หักจากกองนั้น)', a.potMode === 'auto')}${opt('hand', 'เงินในมือ', a.potMode === 'hand')}${allocCfg().names.map((n, i) => opt(i, n, String(a.potMode) === String(i))).join('')}${opt(FAM, 'เงินเดือน (ครอบครัว)', String(a.potMode) === String(FAM))}</select></label>` : (DB.live ? '<p class="hint">ยังเลือก “จ่ายจากกอง” ไม่ได้ ให้รันไฟล์ update-pot.sql ใน Supabase หนึ่งครั้ง</p>' : '')}
+        ${DB.hasPot ? `<div class="paysrc"><div class="qline"><span class="fl">จ่ายจาก</span><button class="qbtn ${a.payHelp ? 'on' : ''}" data-act="pay-help" aria-label="อธิบาย">?</button></div>
+          ${a.payHelp ? '<div class="helpbox">• ใช้กับรายจ่ายทั้งชุดที่พิมพ์ (เปลี่ยนรายบรรทัดได้ที่แต่ละรายการ)<br>• <b>หักอัตโนมัติ</b>: ถ้าชื่อคนตรงกับชื่อกอง เช่น เกด จะหักจากกองนั้น ถ้าไม่ตรงจะหักจากเงินในมือ<br>• หรือเลือกกอง / กระเป๋าเดียวให้ทั้งชุดเลย</div>' : ''}
+          <select data-change="add-potmode">${opt('auto', 'หักอัตโนมัติ', a.potMode === 'auto')}${opt('hand', 'เงินในมือ', a.potMode === 'hand')}${allocCfg().names.map((n, i) => opt(i, n, String(a.potMode) === String(i))).join('')}${walletCards().map((c) => opt('c:' + c.id, c.emoji + ' ' + c.name, a.potMode === 'c:' + c.id)).join('')}</select></div>` : (DB.live ? '<p class="hint">ยังเลือก “จ่ายจากกอง” ไม่ได้ ให้รันไฟล์ update-pot.sql ใน Supabase หนึ่งครั้ง</p>' : '')}
         <textarea id="addText" data-input="add-text" placeholder="พิมพ์หรือวางรายการที่นี่">${esc(a.text)}</textarea>
         <div class="qline"><button class="qbtn ${a.help ? 'on' : ''}" data-act="add-help" aria-label="วิธีพิมพ์">?</button>${a.help ? '' : '<span class="muted">วิธีพิมพ์</span>'}</div>
         ${a.help ? `<div class="helpbox">• พิมพ์หลายรายการได้ ขึ้นบรรทัดใหม่หรือเขียนต่อกันก็ได้<br>• ใส่ชื่อ: <code>เกด: ข้าว 50</code> หรือ <code>@เกด ข้าว 50</code><br>• รายรับ ใส่ <code>+</code> นำหน้า เช่น <code>+ ขายของ 300</code><br>• ระบุวัน: <code>เมื่อวาน</code> หรือ <code>27/10</code><br>• ตัวอย่าง: <code>ซื้อถ่านปิ้งย่าง 40 บาท ซื้อขนม 15 บาท</code></div>` : ''}
@@ -645,7 +648,7 @@
   }
   async function saveTxEdit(id) {
     const patch = { date: $('#mDate').value, type: $('#mType').value, amount: num($('#mAmt').value), category: $('#mCat').value, description: $('#mDesc').value.trim(), person: $('#mPerson').value.trim() };
-    if (DB.hasPot) { const pv = $('#mPot') ? $('#mPot').value : ''; patch.pot = patch.type === 'expense' && pv !== '' ? Number(pv) : null; }
+    if (DB.hasPot) { const pv = $('#mPot') ? $('#mPot').value : ''; patch.pot = patch.type === 'expense' ? parsePot(pv) : null; if (patch.pot != null) patch.pot = String(patch.pot); }
     if (!patch.date || !(patch.amount >= 0)) return toast('กรอกวันที่และจำนวนเงินให้ถูกต้อง', true);
     try {
       const updated = await DB.updateTx(id, patch);
@@ -1127,6 +1130,7 @@
       case 'person-toggle': if (state.personOpen.has(v)) state.personOpen.delete(v); else state.personOpen.add(v); render(true); break;
       case 'add-chip': state.add.person = state.add.person === v ? '' : v; reparse(); render(true); break;
       case 'add-help': state.add.help = !state.add.help; render(true); break;
+      case 'pay-help': state.add.payHelp = !state.add.payHelp; render(true); break;
       case 'row-type': { const r = state.add.rows[i]; if (r.type !== v) { r.type = v; const c = P.classify(r.desc, cats(), v); r.category = c ? c.name : P.FALLBACK[v]; } r.pot = resolvePot(r); renderPreview(); break; }
       case 'row-del': state.add.rows.splice(i, 1); renderPreview(); break;
       case 'add-save': saveAdd(el); break;
@@ -1271,7 +1275,7 @@
     else if (kind === 'list-person') { state.list.person = el.value; render(true); }
     else if (kind === 'list-cat') { state.list.cat = el.value; render(true); }
     else if (kind === 'add-potmode') { state.add.potMode = el.value; reparse(); renderPreview(); }
-    else if (kind === 'row') { const r = state.add.rows[Number(el.dataset.i)]; if (r) { if (el.dataset.f === 'pot') r.pot = el.value === '' ? null : Number(el.value); else r[el.dataset.f] = el.value; if (el.dataset.f === 'category') { const pr = el.closest('.prow'); if (pr) pr.style.setProperty('--rc', catInfo(el.value, r.type).color); } } }
+    else if (kind === 'row') { const r = state.add.rows[Number(el.dataset.i)]; if (r) { if (el.dataset.f === 'pot') r.pot = parsePot(el.value); else r[el.dataset.f] = el.value; if (el.dataset.f === 'category') { const pr = el.closest('.prow'); if (pr) pr.style.setProperty('--rc', catInfo(el.value, r.type).color); } } }
     else if (kind === 'greeting') { state.settings.greeting = el.value.trim(); saveSetting('greeting'); renderTabs(); toast('บันทึกข้อความแล้ว ✓'); }
     else if (kind === 'cat-kw') {
       const list = cats().map((c) => Object.assign({}, c)), c = list[Number(el.dataset.i)];

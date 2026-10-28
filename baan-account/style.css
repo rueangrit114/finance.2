@@ -413,3 +413,10 @@ label.f, div.f { display: flex; flex-direction: column; gap: 5px; font-size: 12.
 .paywrap { display: flex; align-items: center; gap: 8px; margin-top: 8px; font-size: 12.5px; color: var(--muted); }
 .paywrap select { flex: 1; }
 .srow2 input[readonly] { background: transparent; border: 1px dashed var(--border); color: var(--muted); }
+.chk { display: flex; gap: 10px; align-items: flex-start; font-size: 13px; color: var(--muted); margin: 4px 0 10px; line-height: 1.5; }
+.chk input { width: 20px; height: 20px; flex: none; padding: 0; margin-top: 2px; accent-color: var(--accent); }
+.paysrc .qline { margin: 0 0 6px; }
+.paysrc .fl { font-size: 12.5px; color: var(--muted); font-weight: 500; }
+.paysrc .helpbox { margin: 0 0 8px; }
+.paysrc { margin-bottom: 10px; }
+[hidden] { display: none !important; }
