@@ -6,6 +6,6 @@
 //  ถ้ายังไม่ได้ใส่ แอพจะทำงานแบบ "โหมดทดลอง" เก็บข้อมูลในเครื่องนั้นๆ ก่อน
 // ============================================================
 window.APP_CONFIG = {
-  SUPABASE_URL: "YOUR_SUPABASE_URL",
-  SUPABASE_ANON_KEY: "YOUR_SUPABASE_ANON_KEY",
+  SUPABASE_URL: "https://uwueeowgzgczusnsfbua.supabase.co",
+  SUPABASE_ANON_KEY: "sb_publishable_3swXENsvRDg0ZeTJZoeuww_LTtGPgPQ",
 };
