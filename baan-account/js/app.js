@@ -217,7 +217,7 @@
   function localBanner() {
     if (!DB.live) return '';
     const c = DB.localCounts(), n = c.tx + c.shop + c.moves;
-    return n > 0 ? `<div class="demopill" style="display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap"><span>พบข้อมูลที่จดไว้ในเครื่องนี้ ${n} รายการ ที่ยังไม่ได้ขึ้น Supabase</span><button class="btn sm primary" data-act="import-local">ย้ายขึ้น Supabase</button></div>` : '';
+    return n > 0 ? `<div class="demopill" style="display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap"><span>พบข้อมูลที่จดไว้ในเครื่องนี้ ${n} รายการ ที่ยังไม่ได้ขึ้น Supabase</span><span style="display:flex;gap:8px"><button class="btn sm primary" data-act="import-local">ย้ายขึ้น Supabase</button><button class="btn sm" data-act="discard-local">ไม่ย้าย</button></span></div>` : '';
   }
   async function importLocal(btn) {
     btn.disabled = true;
@@ -302,12 +302,25 @@
       }).join('');
     }
 
-    // เงินคงเหลือแยกตามกอง (จากหน้าร้านข้าว)
-    const ps = potStats(), cfg = allocCfg();
-    const potTotal = sumBy(ps, (x) => x.bal);
-    const potCard = state.shopDays.length || state.moves.length ? `<div class="card"><div class="pbar" style="margin-bottom:6px"><h2>เงินคงเหลือแยกตามกอง</h2><a class="link" data-act="tab" data-v="shop">ดูที่หน้าร้านข้าว ›</a></div>
-      <div class="potbig"><small>รวมทั้ง 3 กอง</small><b>${money(potTotal)}</b></div>
-      ${[0, 1, 2].map((i) => `<div class="lrow"><div class="nm"><i class="sw" style="background:var(--pot${i})"></i><span>${esc(cfg.names[i])}</span></div><div class="num ${ps[i].bal < 0 ? 'exp' : ''}">${money(ps[i].bal)}<span class="pc">${potTotal > 0 ? pct(Math.max(0, ps[i].bal), potTotal) + '%' : ''}</span></div><div class="bar"><i style="width:${potTotal > 0 ? pct(Math.max(0, ps[i].bal), potTotal) : 0}%;background:var(--pot${i})"></i></div></div>`).join('')}</div>` : '';
+    // คงเหลือในมือ แยกตามที่เก็บ (หักยอด 3 กองจากหน้าร้านข้าว)
+    const cfg = allocCfg();
+    const view = d.potView === 'period' ? 'period' : 'all';
+    const pFrom = view === 'period' ? r.from : '0000-01-01', pTo = view === 'period' ? r.to : '9999-12-31';
+    const handTx = inRange(state.tx, pFrom, pTo);
+    const hand = total(handTx, 'income') - total(handTx, 'expense');
+    const psx = [0, 1, 2].map(() => ({ inn: 0, out: 0 }));
+    state.shopDays.filter((e) => e.date >= pFrom && e.date <= pTo).forEach((e) => { const a = entryAmounts(e); [0, 1, 2].forEach((i) => { psx[i].inn += a[i] || 0; }); });
+    state.moves.filter((m) => m.date >= pFrom && m.date <= pTo).forEach((m) => { if (psx[m.pot]) { if (m.dir === 'in') psx[m.pot].inn += m.amount; else psx[m.pot].out += m.amount; } });
+    const bal = psx.map((x) => round2(x.inn - x.out));
+    const potSum = sumBy(bal, (x) => x), free = round2(hand - potSum);
+    const barBase = Math.max(1, hand, sumBy(bal.filter((x) => x > 0), (x) => x));
+    const potCard = state.shopDays.length || state.moves.length ? `<div class="card"><div class="pbar" style="margin-bottom:8px"><h2>คงเหลือในมือ แยกตามที่เก็บ</h2><a class="link" data-act="tab" data-v="shop">ดูที่หน้าร้านข้าว ›</a></div>
+      <div class="seg" style="margin-bottom:10px"><button class="${view === 'all' ? 'on' : ''}" data-act="pot-view" data-v="all">สะสมทั้งหมด</button><button class="${view === 'period' ? 'on' : ''}" data-act="pot-view" data-v="period">${esc(r.label)}</button></div>
+      <div class="potbig"><small>คงเหลือในมือ (รายรับ − รายจ่าย ${view === 'all' ? 'ทั้งหมด' : 'ช่วงนี้'}, ทุกคน)</small><b class="${hand < 0 ? 'exp' : ''}">${money(hand)}</b></div>
+      <div class="minus">หัก ที่เก็บแยกไว้ในแต่ละกอง</div>
+      ${[0, 1, 2].map((i) => `<div class="lrow"><div class="nm"><i class="sw" style="background:var(--pot${i})"></i><span>${esc(cfg.names[i])}</span></div><div class="num ${bal[i] < 0 ? 'exp' : ''}">${money(bal[i])}</div><div class="bar"><i style="width:${Math.min(100, Math.max(0, bal[i]) / barBase * 100)}%;background:var(--pot${i})"></i></div></div>`).join('')}
+      <div class="freebox ${free < 0 ? 'neg' : ''}"><div><b>เหลือส่วนที่ไม่ได้เก็บแยกไว้</b><small>${free < 0 ? 'ติดลบ = เงินในมือน้อยกว่ายอดที่ตั้งไว้ในกอง' : 'ใช้จ่ายได้ปกติ'}</small></div><b class="num">${money(free)}</b></div>
+      <p class="hint">ยอดแต่ละกองคิดจาก (แบ่งจากกำไรร้านข้าว + โอนเข้า − โอนออก) ${view === 'all' ? 'ทั้งหมด' : 'ในช่วงที่เลือก'}</p></div>` : '';
 
     v.innerHTML = `
       ${localBanner()}
@@ -316,7 +329,7 @@
       <div class="kpis">
         <div class="kpi"><span>รายรับ</span><b class="inc">${money(inc)}</b></div>
         <div class="kpi"><span>รายจ่าย</span><b class="exp">${money(exp)}</b></div>
-        <div class="kpi accent"><span>คงเหลือ</span><b>${money(inc - exp)}</b></div>
+        <div class="kpi accent"><span>คงเหลือในมือ</span><b>${money(inc - exp)}</b></div>
       </div>
       ${potCard}
       <div class="card"><h2>ประวัติรายรับรายจ่าย</h2><p class="lead">${d.mode === 'day' ? '7 วันล่าสุด' : d.mode === 'year' ? 'รายเดือน' : 'รายวัน'} · แตะแท่งกราฟเพื่อดูรายละเอียด</p>
@@ -516,25 +529,55 @@
     catch (e) { toast('ลบไม่สำเร็จ: ' + (e.message || e), true); }
   }
 
-  function openMove(pot) {
+  function openMove(pot, mv) {
     const cfg = allocCfg();
-    openModal(`<h3>บันทึกเงินเข้า / ออก</h3>
+    state.moveEditId = mv ? mv.id : null;
+    openModal(`<h3>${mv ? 'แก้ไขรายการเงินเข้า / ออก' : 'บันทึกเงินเข้า / ออก'}</h3>
       <div class="fields">
         <label class="f">กอง<select id="mvPot">${cfg.names.map((n, i) => opt(i, n, i === pot)).join('')}</select></label>
-        <label class="f">ประเภท<select id="mvDir">${opt('out', 'โอนออก (เอาไปใช้)', true)}${opt('in', 'โอนเข้า (ใส่เพิ่ม)')}</select></label>
-        <label class="f">จำนวนเงิน<input id="mvAmt" class="money-in" inputmode="decimal" placeholder="0"></label>
-        <label class="f">วันที่<input type="date" id="mvDate" value="${today()}"></label>
+        <label class="f">ประเภท<select id="mvDir">${opt('out', 'โอนออก (เอาไปใช้)', !mv || mv.dir === 'out')}${opt('in', 'โอนเข้า (ใส่เพิ่ม)', mv && mv.dir === 'in')}</select></label>
+        <label class="f">จำนวนเงิน<input id="mvAmt" class="money-in" inputmode="decimal" placeholder="0" value="${mv ? mv.amount : ''}"></label>
+        <label class="f">วันที่<input type="date" id="mvDate" value="${mv ? mv.date : today()}"></label>
       </div>
-      <div class="fields one"><label class="f">หมายเหตุ<input id="mvNote" placeholder="เช่น เอาไปซื้อของเข้าร้าน"></label></div>
+      <div class="fields one"><label class="f">หมายเหตุ<input id="mvNote" placeholder="เช่น เอาไปซื้อของเข้าร้าน" value="${mv ? esc(mv.note) : ''}"></label></div>
       <div class="actions"><button class="btn" data-act="modal-close">ยกเลิก</button><button class="btn primary" data-act="move-save">บันทึก</button></div>`);
   }
   async function saveMove() {
     const row = { pot: Number($('#mvPot').value), dir: $('#mvDir').value, amount: num($('#mvAmt').value), date: $('#mvDate').value, note: $('#mvNote').value.trim() };
     if (!(row.amount > 0) || !row.date) return toast('กรอกจำนวนเงินและวันที่', true);
     try {
-      state.moves.push(await DB.addMove(row));
+      if (state.moveEditId) {
+        const u = await DB.updateMove(state.moveEditId, row);
+        const i = state.moves.findIndex((m) => m.id === state.moveEditId);
+        if (i >= 0) state.moves[i] = u;
+      } else state.moves.push(await DB.addMove(row));
       closeModal(); state.potOpen = row.pot; toast('บันทึกแล้ว ✓'); render(true);
     } catch (e) { toast('บันทึกไม่สำเร็จ: ' + (e.message || e) + (DB.live ? ' (ลองรัน schema.sql ใหม่ใน Supabase)' : ''), true); }
+  }
+
+  function openAutoEdit(date, i) {
+    const e = existingShop(date);
+    if (!e) return;
+    const cfg = allocCfg(), cur = entryAmounts(e)[i] || 0;
+    state.autoEdit = { date, i };
+    openModal(`<h3>แก้ยอดที่แบ่งเข้า “${esc(cfg.names[i])}”</h3>
+      <p class="lead">วันที่ ${fmtD(date)} · กำไรของวัน ${money(e.profit)} · ยอดขาย/กำไรของวันไม่เปลี่ยน แก้เฉพาะส่วนที่แบ่งเข้ากองนี้</p>
+      <label class="f">จำนวนเงิน (บาท)<input id="aeAmt" class="money-in" inputmode="decimal" value="${cur}"></label>
+      <div class="actions"><button class="btn" data-act="modal-close">ยกเลิก</button><button class="btn primary" data-act="auto-save">บันทึก</button></div>`);
+  }
+  async function saveAutoAmount(date, i, val) {
+    const e = existingShop(date);
+    if (!e) return;
+    const am = entryAmounts(e).slice();
+    am[i] = round2(Math.max(0, val));
+    const p = Math.max(0, e.profit);
+    const alloc = { pcts: am.map((x) => (p > 0 ? round2((x / p) * 100) : 0)), amounts: am };
+    try {
+      const saved = await DB.saveShop({ date: e.date, sales: e.sales, cost: e.cost, profit: e.profit, note: e.note, alloc });
+      const k = state.shopDays.findIndex((x) => x.date === date);
+      if (k >= 0) state.shopDays[k] = saved;
+      closeModal(); toast('แก้ไขแล้ว ✓'); render(true);
+    } catch (er) { toast('แก้ไขไม่สำเร็จ: ' + (er.message || er), true); }
   }
 
   function openStockTool() {
@@ -626,7 +669,7 @@
 
   function potLedger(i) {
     const rows = [];
-    state.shopDays.forEach((e) => { const a = entryAmounts(e)[i] || 0; if (a > 0) rows.push({ date: e.date, label: 'แบ่งจากกำไรร้านข้าว', amt: a, auto: true }); });
+    state.shopDays.forEach((e) => { const a = entryAmounts(e)[i] || 0; if (a > 0) rows.push({ date: e.date, label: 'แบ่งจากกำไรร้านข้าว', amt: a, auto: true, pot: i }); });
     state.moves.filter((m) => m.pot === i).forEach((m) => rows.push({ date: m.date, label: m.note || (m.dir === 'in' ? 'โอนเข้า' : 'โอนออก'), amt: m.dir === 'in' ? m.amount : -m.amount, id: m.id }));
     return rows.sort((a, b) => (a.date < b.date ? 1 : -1)).slice(0, 30);
   }
@@ -709,7 +752,8 @@
         <div class="pots">${[0, 1, 2].map((i) => `<button class="pot ${state.potOpen === i ? 'on' : ''}" data-act="pot-open" data-i="${i}" style="--pc:var(--pot${i})"><span class="pn">${esc(cfg.names[i])}</span><b class="${ps[i].bal < 0 ? 'exp' : ''}">${money(ps[i].bal)}</b><small>เข้า ${money(ps[i].in)}<br>ออก ${money(ps[i].out)}</small></button>`).join('')}</div>
         <div class="potsum"><div><small>เงินเข้าทั้งหมด</small><b class="inc">${money(sumBy(ps, (x) => x.in))}</b></div><div><small>เงินออกทั้งหมด</small><b class="exp">${money(sumBy(ps, (x) => x.out))}</b></div><div><small>คงเหลือจริง</small><b>${money(sumBy(ps, (x) => x.bal))}</b></div></div>
         ${state.potOpen >= 0 ? `<div class="ledger"><div class="ledhead"><b>ประวัติ: ${esc(cfg.names[state.potOpen])}</b><button class="btn sm" data-act="move-open" data-i="${state.potOpen}">+ เข้า/ออก</button></div>
-          ${ledger.length ? ledger.map((x) => `<div class="irow"><span>${fmtShort(x.date)} · ${esc(x.label)}</span><span class="num ${x.amt >= 0 ? 'inc' : 'exp'}">${x.amt >= 0 ? '+' : ''}${money(x.amt)}${x.id ? ` <button class="icon del tiny" data-act="move-del" data-id="${x.id}" aria-label="ลบ">${ICON.del}</button>` : ''}</span></div>`).join('') : '<div class="sidehint">ยังไม่มีรายการ</div>'}</div>` : ''}
+          ${ledger.length ? ledger.map((x) => `<div class="irow lrw"><span>${fmtShort(x.date)} · ${esc(x.label)}</span><span class="num ${x.amt >= 0 ? 'inc' : 'exp'}">${x.amt >= 0 ? '+' : ''}${money(x.amt)}</span><span class="lbt">${x.id ? `<button class="icon tiny" data-act="move-edit" data-id="${x.id}" aria-label="แก้ไข">${ICON.edit}</button><button class="icon del tiny" data-act="move-del" data-id="${x.id}" aria-label="ลบ">${ICON.del}</button>` : `<button class="icon tiny" data-act="auto-edit" data-date="${x.date}" data-i="${x.pot}" aria-label="แก้ไข">${ICON.edit}</button><button class="icon del tiny" data-act="auto-del" data-date="${x.date}" data-i="${x.pot}" aria-label="ลบ">${ICON.del}</button>`}</span></div>`).join('')
+          : '<div class="sidehint">ยังไม่มีรายการ</div>'}</div>` : ''}
       </div>
 
       <div class="card"><div class="pbar" style="margin-bottom:6px"><h2>ทุนหมุนเวียน</h2><button class="btn sm" data-act="stock-open">จัดรายการซื้อของย้อนหลัง</button></div>
@@ -818,7 +862,7 @@
       <div class="kpis">
         <div class="kpi"><span>รายรับ</span><b class="inc">${money(inc)}</b>${dTxt(delta(inc, pinc), false)}</div>
         <div class="kpi"><span>รายจ่าย</span><b class="exp">${money(exp)}</b>${dTxt(dExp, true)}</div>
-        <div class="kpi accent"><span>คงเหลือ</span><b>${money(inc - exp)}</b><small>${nDays > 0 ? 'จ่ายเฉลี่ย ' + money(exp / nDays) + '/วัน' : ''}</small></div>
+        <div class="kpi accent"><span>คงเหลือในมือ</span><b>${money(inc - exp)}</b><small>${nDays > 0 ? 'จ่ายเฉลี่ย ' + money(exp / nDays) + '/วัน' : ''}</small></div>
       </div>
       <div class="card"><h2>ข้อสังเกต</h2><div class="tips">${tips.map((t) => `<div class="tip">💡 ${esc(t)}</div>`).join('')}</div></div>
       <div class="card"><h2>หมวดรายจ่าย เทียบช่วงก่อน</h2>
@@ -970,6 +1014,10 @@
       case 'pot-open': state.potOpen = state.potOpen === i ? -1 : i; render(true); break;
       case 'move-open': openMove(i >= 0 ? i : 0); break;
       case 'move-save': saveMove(); break;
+      case 'move-edit': { const m = state.moves.find((x) => x.id === el.dataset.id); if (m) openMove(m.pot, m); break; }
+      case 'auto-edit': openAutoEdit(el.dataset.date, i); break;
+      case 'auto-save': saveAutoAmount(state.autoEdit.date, state.autoEdit.i, num($('#aeAmt').value)); break;
+      case 'auto-del': if (confirm(`ตั้งยอดที่แบ่งเข้ากองนี้ของวันที่ ${fmtD(el.dataset.date)} เป็น ฿0 ?\n(ยอดขายและกำไรของวันยังอยู่ แก้กลับได้ภายหลัง)`)) saveAutoAmount(el.dataset.date, i, 0); break;
       case 'move-del': if (confirm('ลบรายการเงินเข้า/ออกนี้?')) DB.deleteMove(el.dataset.id).then(() => { state.moves = state.moves.filter((m) => m.id !== el.dataset.id); render(true); }).catch((er) => toast('ลบไม่สำเร็จ: ' + (er.message || er), true)); break;
       case 'stock-open': openStockTool(); break;
       case 'stock-move': moveStock(); break;
@@ -1018,6 +1066,12 @@
         break;
       case 'export': exportCsv(v); break;
       case 'import-local': importLocal(el); break;
+      case 'discard-local': {
+        const c = DB.localCounts(), n = c.tx + c.shop + c.moves;
+        if (confirm(`ลบข้อมูล ${n} รายการที่จดไว้ในเครื่องนี้ทิ้ง โดยไม่ย้ายขึ้น Supabase ?\n(ลบแล้วเอากลับคืนไม่ได้)`)) { DB.clearLocal(); toast('ลบข้อมูลในเครื่องนี้แล้ว'); render(true); }
+        break;
+      }
+      case 'pot-view': state.dash.potView = v; render(true); break;
       default: break;
     }
   });

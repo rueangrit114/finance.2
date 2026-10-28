@@ -116,6 +116,19 @@
       LS.set('moves', LS.get('moves', []).concat(made));
       return made;
     },
+    async updateMove(id, row) {
+      const payload = { date: row.date, pot: row.pot, direction: row.dir, amount: row.amount, note: row.note || '' };
+      if (live) {
+        const { data, error } = await sb.from('pot_moves').update(payload).eq('id', id).select();
+        if (error) throw error;
+        return normMove(data[0]);
+      }
+      const list = LS.get('moves', []);
+      const i = list.findIndex((r) => r.id === id);
+      if (i >= 0) list[i] = Object.assign(list[i], payload);
+      LS.set('moves', list);
+      return normMove(list[i]);
+    },
     async deleteMove(id) {
       if (live) {
         const { error } = await sb.from('pot_moves').delete().eq('id', id);
@@ -128,6 +141,9 @@
     // ข้อมูลที่เคยจดไว้ในเครื่องนี้ตอนยังเป็นโหมดทดลอง (ยังไม่ขึ้น Supabase)
     localCounts() {
       return { tx: LS.get('tx', []).length, shop: LS.get('shop', []).length, moves: LS.get('moves', []).length };
+    },
+    clearLocal() {
+      ['tx', 'shop', 'moves'].forEach((k) => { try { localStorage.removeItem('baan:' + k); } catch (e) { /* ignore */ } });
     },
     async importLocal() {
       if (!live) throw new Error('ยังไม่ได้เชื่อมต่อ Supabase');
