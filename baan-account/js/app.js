@@ -94,7 +94,7 @@
     add: { date: today(), person: '', text: '', rows: [], help: false, potMode: 'auto' },
     ana: { mode: 'month', anchor: today() },
     shopUI: { mode: 'month', anchor: today(), form: null, series: { sales: true, cost: true, profit: true } },
-    themeGroup: 'pastel', sel: {}, open: {}, personOpen: new Set(), catOpen: null, potOpen: -1, lastLoad: Date.now(),
+    themeGroup: 'pastel', sel: {}, open: {}, personOpen: new Set(), catOpen: null, potOpen: -1, anaOpen: new Set(), lastLoad: Date.now(),
   };
   const cache = {};
 
@@ -939,7 +939,12 @@
       </div>
       <div class="card c-ana"><h2>ข้อสังเกต</h2><div class="tips">${tips.map((t) => `<div class="tip">💡 ${esc(t)}</div>`).join('')}</div></div>
       <div class="card c-exp"><h2>หมวดรายจ่าย เทียบช่วงก่อน</h2>
-        ${cl.length ? cl.map(([name, val]) => { const p = pm.get(name) || 0, dd = delta(val, p); return `<div class="lrow"><div class="nm"><i class="sw" style="background:${catInfo(name, 'expense').color}"></i><span>${esc(catInfo(name, 'expense').emoji)} ${esc(name)}</span></div><div class="num">${money(val)} ${dd === null ? '' : `<span class="pc ${dd > 0 ? 'exp' : 'inc'}">${dd > 0 ? '▲' : '▼'}${Math.abs(dd)}%</span>`}</div><div class="bar"><i style="width:${(val / cmax) * 100}%;background:${catInfo(name, 'expense').color}"></i></div></div>`; }).join('') : '<div class="empty slim">ยังไม่มีรายจ่ายในช่วงนี้</div>'}
+        ${cl.length ? cl.map(([name, val]) => {
+          const p = pm.get(name) || 0, dd = delta(val, p), open = state.anaOpen.has(name);
+          const items = open ? cur.filter((t) => t.type === 'expense' && t.category === name).sort((x, y) => (x.date < y.date ? 1 : x.date > y.date ? -1 : y.amount - x.amount)) : [];
+          return `<div class="anacat ${open ? 'open' : ''}"><div class="lrow tap" data-act="ana-cat" data-v="${esc(name)}"><div class="nm"><i class="sw" style="background:${catInfo(name, 'expense').color}"></i><span>${esc(catInfo(name, 'expense').emoji)} ${esc(name)}</span></div><div class="num">${money(val)} ${dd === null ? '' : `<span class="pc ${dd > 0 ? 'exp' : 'inc'}">${dd > 0 ? '▲' : '▼'}${Math.abs(dd)}%</span>`}${ICON.chev}</div><div class="bar"><i style="width:${(val / cmax) * 100}%;background:${catInfo(name, 'expense').color}"></i></div></div>
+          ${open ? `<div class="anaitems">${items.slice(0, 40).map((t) => `<div class="irow"><span>${fmtShort(t.date)} · ${esc(t.description || name)}${t.person ? ` <small class="muted">${esc(t.person)}</small>` : ''}</span><b class="num">${money(t.amount)}</b></div>`).join('')}${items.length > 40 ? `<div class="sidehint">และอีก ${items.length - 40} รายการ</div>` : ''}<div class="irow tot"><span>รวม ${items.length} รายการ</span><b class="num">${money(val)}</b></div></div>` : ''}</div>`;
+        }).join('') : '<div class="empty slim">ยังไม่มีรายจ่ายในช่วงนี้</div>'}
       </div>
       <div class="card c-chart"><h2>ใช้จ่ายแต่ละวันในสัปดาห์</h2><p class="lead">ค่าเฉลี่ยต่อวัน · แตะแท่งเพื่อดูค่า</p>${wChart}</div>
       <div class="grid2">
@@ -1055,7 +1060,7 @@
     const act = el.dataset.act, v = el.dataset.v, k = el.dataset.k, i = el.dataset.i != null ? Number(el.dataset.i) : null;
     switch (act) {
       case 'tab': go(v); break;
-      case 'p-mode': { const st = stOf(k); st.mode = v; state.sel = {}; render(true); break; }
+      case 'p-mode': { const st = stOf(k); st.mode = v; state.sel = {}; state.anaOpen = new Set(); render(true); break; }
       case 'p-prev': case 'p-next': { const st = stOf(k); st.anchor = step(st.mode, st.anchor, act === 'p-next' ? 1 : -1); state.sel = {}; if (k === 'list') state.list.open = new Set(); render(true); break; }
       case 'p-pick': openPicker(k); break;
       case 'pk-save': applyPicker(k); break;
@@ -1140,6 +1145,7 @@
         if (confirm(`ลบข้อมูล ${n} รายการที่จดไว้ในเครื่องนี้ทิ้ง โดยไม่ย้ายขึ้น Supabase ?\n(ลบแล้วเอากลับคืนไม่ได้)`)) { DB.clearLocal(); toast('ลบข้อมูลในเครื่องนี้แล้ว'); render(true); }
         break;
       }
+      case 'ana-cat': if (state.anaOpen.has(v)) state.anaOpen.delete(v); else state.anaOpen.add(v); render(true); break;
       case 'pot-view': state.potView = v; render(true); break;
       case 'd-open': {
         if (Date.now() - (state.swipedAt || 0) < 500) break;
