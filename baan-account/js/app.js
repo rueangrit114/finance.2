@@ -332,6 +332,36 @@
     } catch (e) { toast('ย้ายไม่สำเร็จ: ' + (e.message || e), true); btn.disabled = false; }
   }
 
+  /* การ์ดทุนหมุนเวียน (ใช้ในหน้าร้านข้าว) */
+  function capCardHtml(st) {
+    // ทุนหมุนเวียน = เงินในมือ (ไม่รวมเงินเดือน) − เงินที่แยกไว้ใน 3 กอง
+    const r = range(st.mode, st.anchor), cfg = allocCfg();
+    const view = state.potView === 'period' ? 'period' : 'all';
+    const allc = capCalc(ALL_FROM, ALL_TO), cv = view === 'period' ? capCalc(r.from, r.to) : allc;
+    const barBase = Math.max(1, cv.hand, sumBy(cv.bal.filter((x) => x > 0), (x) => x));
+    const shopR = state.shopDays.filter((e) => e.date >= r.from && e.date <= r.to);
+    const sSales = sumBy(shopR, (e) => e.sales), sProfit = sumBy(shopR, (e) => e.profit), gotCap = round2(sSales - sProfit);
+    const isToday = st.mode === 'day' && st.anchor === today();
+    const capOpen = !!state.open.capdet;
+    return state.tx.length || state.shopDays.length || state.moves.length ? `<div class="card c-cap"><div class="pbar" style="margin-bottom:10px"><h2>ทุนหมุนเวียน</h2></div>
+      <div class="kpis mini">
+        <div class="kpi"><span>${isToday ? 'ทุนที่ได้วันนี้' : 'ทุนที่ได้ช่วงนี้'}</span><b>${money(gotCap)}</b><small>${shopR.length ? 'ยอดขาย − กำไร' : 'ยังไม่จดยอดร้านข้าว'}</small></div>
+        <div class="kpi accent"><span>ทุนที่เหลือรวม</span><b>${money(allc.free)}</b><small>ในมือ ไม่รวมกอง</small></div>
+        <div class="kpi"><span>เงิน 3 กอง</span><b>${money(allc.potSum)}</b><small>เก็บแยกไว้</small></div>
+      </div>
+      ${shopR.length ? `<div class="saleline">🍚 ขายร้านข้าว ${money(sSales)} = ทุน ${money(gotCap)} + กำไร ${money(sProfit)}</div>` : ''}
+      <button class="linkbtn" data-act="acc" data-v="capdet">${capOpen ? 'ซ่อนวิธีคิด ▴' : 'ดูวิธีคิด / ปรับให้ตรงเงินจริง ▾'}</button>
+      ${capOpen ? `<div class="capdet">
+        <div class="seg" style="margin-bottom:10px"><button class="${view === 'all' ? 'on' : ''}" data-act="pot-view" data-v="all">สะสมทั้งหมด</button><button class="${view === 'period' ? 'on' : ''}" data-act="pot-view" data-v="period">${esc(r.label)}</button></div>
+        <div class="potbig"><small>เงินในมือ (รายรับ − รายจ่าย ไม่รวมเงินเดือน)${cv.adj ? ' + ปรับยอด ' + money(cv.adj) : ''}</small><b class="${cv.hand + cv.adj < 0 ? 'exp' : ''}">${money(cv.hand + cv.adj)}</b></div>
+        <div class="minus">หัก ที่เก็บแยกไว้ในแต่ละกอง</div>
+        ${[0, 1, 2].map((i) => `<div class="lrow"><div class="nm"><i class="sw" style="background:var(--pot${i})"></i><span>${esc(cfg.names[i])}</span></div><div class="num ${cv.bal[i] < 0 ? 'exp' : ''}">${money(cv.bal[i])}</div><div class="bar"><i style="width:${Math.min(100, Math.max(0, cv.bal[i]) / barBase * 100)}%;background:var(--pot${i})"></i></div></div>`).join('')}
+        <div class="freebox ${cv.free < 0 ? 'neg' : ''}"><div><b>ทุนที่เหลือ</b><small>${cv.free < 0 ? 'ติดลบ = เงินในมือน้อยกว่ายอดที่ตั้งไว้ในกอง' : 'เงินที่ใช้หมุนร้านได้'}</small></div><b class="num">${money(cv.free)}</b></div>
+        <p class="hint">ยอดกอง = แบ่งจากกำไรร้านข้าว + โอนเข้า − โอนออก − รายจ่ายที่เลือก “จ่ายจากกอง”</p>
+        <button class="btn sm" data-act="adj-open">นับเงินจริง / ปรับยอด</button>
+      </div>` : ''}</div>` : '';
+  }
+
   function viewDash(v) {
     const d = state.dash, r = range(d.mode, d.anchor);
     const base = personFilter(state.tx, d.person);
@@ -405,33 +435,6 @@
       }).join('');
     }
 
-    // ทุนหมุนเวียน = เงินในมือ (ไม่รวมเงินเดือน) − เงินที่แยกไว้ใน 3 กอง
-    const cfg = allocCfg();
-    const view = d.potView === 'period' ? 'period' : 'all';
-    const allc = capCalc(ALL_FROM, ALL_TO), cv = view === 'period' ? capCalc(r.from, r.to) : allc;
-    const barBase = Math.max(1, cv.hand, sumBy(cv.bal.filter((x) => x > 0), (x) => x));
-    const shopR = state.shopDays.filter((e) => e.date >= r.from && e.date <= r.to);
-    const sSales = sumBy(shopR, (e) => e.sales), sProfit = sumBy(shopR, (e) => e.profit), gotCap = round2(sSales - sProfit);
-    const isToday = d.mode === 'day' && d.anchor === now;
-    const capOpen = !!state.open.capdet;
-    const capCard = state.tx.length || state.shopDays.length || state.moves.length ? `<div class="card c-cap"><div class="pbar" style="margin-bottom:10px"><h2>ทุนหมุนเวียน</h2><a class="link" data-act="tab" data-v="shop">ร้านข้าว ›</a></div>
-      <div class="kpis mini">
-        <div class="kpi"><span>${isToday ? 'ทุนที่ได้วันนี้' : 'ทุนที่ได้ช่วงนี้'}</span><b>${money(gotCap)}</b><small>${shopR.length ? 'ยอดขาย − กำไร' : 'ยังไม่จดยอดร้านข้าว'}</small></div>
-        <div class="kpi accent"><span>ทุนที่เหลือรวม</span><b>${money(allc.free)}</b><small>ในมือ ไม่รวมกอง</small></div>
-        <div class="kpi"><span>เงิน 3 กอง</span><b>${money(allc.potSum)}</b><small>เก็บแยกไว้</small></div>
-      </div>
-      ${shopR.length && !d.person ? `<div class="saleline">🍚 ขายร้านข้าว ${money(sSales)} = ทุน ${money(gotCap)} + กำไร ${money(sProfit)}</div>` : ''}
-      <button class="linkbtn" data-act="acc" data-v="capdet">${capOpen ? 'ซ่อนวิธีคิด ▴' : 'ดูวิธีคิด / ปรับให้ตรงเงินจริง ▾'}</button>
-      ${capOpen ? `<div class="capdet">
-        <div class="seg" style="margin-bottom:10px"><button class="${view === 'all' ? 'on' : ''}" data-act="pot-view" data-v="all">สะสมทั้งหมด</button><button class="${view === 'period' ? 'on' : ''}" data-act="pot-view" data-v="period">${esc(r.label)}</button></div>
-        <div class="potbig"><small>เงินในมือ (รายรับ − รายจ่าย ไม่รวมเงินเดือน)${cv.adj ? ' + ปรับยอด ' + money(cv.adj) : ''}</small><b class="${cv.hand + cv.adj < 0 ? 'exp' : ''}">${money(cv.hand + cv.adj)}</b></div>
-        <div class="minus">หัก ที่เก็บแยกไว้ในแต่ละกอง</div>
-        ${[0, 1, 2].map((i) => `<div class="lrow"><div class="nm"><i class="sw" style="background:var(--pot${i})"></i><span>${esc(cfg.names[i])}</span></div><div class="num ${cv.bal[i] < 0 ? 'exp' : ''}">${money(cv.bal[i])}</div><div class="bar"><i style="width:${Math.min(100, Math.max(0, cv.bal[i]) / barBase * 100)}%;background:var(--pot${i})"></i></div></div>`).join('')}
-        <div class="freebox ${cv.free < 0 ? 'neg' : ''}"><div><b>ทุนที่เหลือ</b><small>${cv.free < 0 ? 'ติดลบ = เงินในมือน้อยกว่ายอดที่ตั้งไว้ในกอง' : 'เงินที่ใช้หมุนร้านได้'}</small></div><b class="num">${money(cv.free)}</b></div>
-        <p class="hint">ยอดกอง = แบ่งจากกำไรร้านข้าว + โอนเข้า − โอนออก − รายจ่ายที่เลือก “จ่ายจากกอง”</p>
-        <button class="btn sm" data-act="adj-open">นับเงินจริง / ปรับยอด</button>
-      </div>` : ''}</div>` : '';
-
     // เงินเดือน (ครอบครัว) + การ์ดของฉัน
     const cards = state.settings.cards || [];
     const quick = [['ซื้อของเข้าร้าน', '🌾', 'exp|cat|' + STOCK], ['รายจ่ายทั้งหมด', '💸', 'exp|all'], ...(knownPeople()[0] ? [['รายจ่าย ' + knownPeople()[0], '👤', 'exp|person|' + knownPeople()[0]]] : [])];
@@ -442,6 +445,10 @@
       ${!cards.length ? `<p class="hint" style="margin:10px 0 8px">เพิ่มการ์ดที่อยากเห็นเอง เช่น</p><div class="chips tight">${quick.map(([n, em, src]) => `<button class="chip" data-act="card-quick" data-n="${esc(n)}" data-e="${em}" data-src="${esc(src)}">+ ${esc(n)}</button>`).join('')}</div>` : ''}
     </div>`;
 
+    const personCard = `<div class="card c-person"><h2>ใครใช้เท่าไหร่</h2><p class="lead">แตะชื่อเพื่อดูว่าใช้อะไรไปบ้าง</p>
+          ${personHtml || '<div class="empty"><div class="big">👤</div>ยังไม่มีข้อมูล</div>'}
+        </div>`;
+
     v.innerHTML = `
       ${localBanner()}
       ${periodBar('dash', d)}
@@ -449,26 +456,21 @@
       <div class="kpis">
         <div class="kpi k-inc"><span>รายรับ</span><b class="inc">${money(inc)}</b></div>
         <div class="kpi k-exp"><span>รายจ่าย</span><b class="exp">${money(exp)}</b></div>
-        <div class="kpi accent"><span>คงเหลือในมือ</span><b>${money(inc - exp)}</b></div>
+        <div class="kpi accent"><span>ทุนที่เหลือรวม</span><b>${money(capCalc(ALL_FROM, ALL_TO).free)}</b><small>ในมือ ไม่รวมกอง</small></div>
       </div>
-      ${capCard}
       ${mine}
+      ${personCard}
       <div class="card c-chart"><h2>ประวัติรายรับรายจ่าย</h2><p class="lead">${d.mode === 'day' ? '7 วันล่าสุด' : d.mode === 'year' ? 'รายเดือน' : 'รายวัน'} · แตะแท่งกราฟเพื่อดูรายละเอียด</p>
         <div class="chartgrid"><div class="cg-chart">${chart}
           <div class="legend"><span><i style="background:var(--expense)"></i>รายจ่าย</span><span><i style="background:var(--income)"></i>รายรับ</span></div></div>
           <aside class="cg-side ${state.sel.dash >= 0 ? '' : 'idle'}" id="side-dash">${dashPanel(state.sel.dash)}</aside></div>
         ${n > 0 ? `<div class="avgs"><div><small>รายจ่ายเฉลี่ย${avgLabel}</small><b class="exp">${money(exp / n)}</b></div><div><small>รายรับเฉลี่ย${avgLabel}</small><b class="inc">${money(inc / n)}</b></div></div>` : ''}
       </div>
-      <div class="grid2">
-        <div class="card c-cat"><div class="pbar" style="margin-bottom:10px"><h2>แยกตามหมวด</h2>
+      <div class="card c-cat"><div class="pbar" style="margin-bottom:10px"><h2>แยกตามหมวด</h2>
           <div class="seg"><button class="${d.catType === 'expense' ? 'on' : ''}" data-act="dash-cattype" data-v="expense">รายจ่าย</button><button class="${d.catType === 'income' ? 'on' : ''}" data-act="dash-cattype" data-v="income">รายรับ</button></div></div>
           ${cl.length ? `<div class="donut-wrap">${C.donut({ data: cl, top: d.catType === 'expense' ? 'รายจ่าย' : 'รายรับ', bottom: money(ctotal) })}
             <div class="leg-list">${cl.map((x) => `<div class="lrow"><div class="nm"><i class="sw" style="background:${x.color}"></i><span>${esc(x.emoji)} ${esc(x.label)}</span></div><div class="num">${money(x.value)}<span class="pc">${pct(x.value, ctotal)}%</span></div><div class="bar"><i style="width:${pct(x.value, ctotal)}%;background:${x.color}"></i></div></div>`).join('')}</div></div>`
             : '<div class="empty"><div class="big">🍃</div>ยังไม่มีข้อมูลในช่วงนี้</div>'}
-        </div>
-        <div class="card c-person"><h2>ใครใช้เท่าไหร่</h2><p class="lead">แตะชื่อเพื่อดูว่าใช้อะไรไปบ้าง</p>
-          ${personHtml || '<div class="empty"><div class="big">👤</div>ยังไม่มีข้อมูล</div>'}
-        </div>
       </div>
       <div class="sp"></div>
       <div class="card c-list"><h2>${d.mode === 'day' ? 'รายการของวันนี้' : d.mode === 'year' ? 'สรุปรายเดือน' : 'สรุปวันต่อวัน'}</h2>${d.mode === 'day' ? '' : '<p class="lead">แตะที่แถวเพื่อดูรายละเอียด</p>'}${daily}</div>`;
@@ -715,40 +717,21 @@
     } catch (er) { toast('แก้ไขไม่สำเร็จ: ' + (er.message || er), true); }
   }
 
-  function openStockTool() {
-    const from = addDays(today(), -120);
-    state.stockPick = new Set();
-    openModal(`<h3>จัดรายการซื้อของเข้าร้านย้อนหลัง</h3>
-      <p class="lead">ติ๊กรายจ่ายที่เป็นการซื้อของมาขาย แล้วย้ายเข้าหมวด “${STOCK}” (ย้อนหลัง 120 วัน)</p>
-      <input id="stockQ" type="search" placeholder="ค้นหา เช่น ข้าวสาร" style="margin-bottom:10px">
-      <div id="stockList" class="stocklist"></div>
-      <div class="actions"><button class="btn" data-act="modal-close">ปิด</button><button class="btn primary" data-act="stock-move" id="stockBtn">ย้ายเข้าหมวด</button></div>`);
-    const draw = () => {
-      const q = $('#stockQ').value.trim().toLowerCase();
-      const list = state.tx.filter((t) => t.type === 'expense' && t.category !== STOCK && t.date >= from && (!q || (t.description + t.category).toLowerCase().includes(q)))
-        .sort((a, b) => (a.date < b.date ? 1 : -1)).slice(0, 150);
-      $('#stockList').innerHTML = list.length ? list.map((t) => `<label class="srow3"><input type="checkbox" data-input="stock-pick" data-id="${t.id}" ${state.stockPick.has(t.id) ? 'checked' : ''}><span class="sd">${esc(t.description || t.category)}<small class="muted"> · ${fmtShort(t.date)}</small></span><b class="num">${money(t.amount)}</b></label>`).join('') : '<div class="empty slim">ไม่พบรายการ</div>';
-      $('#stockBtn').textContent = `ย้ายเข้าหมวด (${state.stockPick.size})`;
-    };
-    $('#stockQ').addEventListener('input', draw);
-    state.stockDraw = draw; draw();
-  }
-  async function moveStock() {
-    const ids = [...state.stockPick];
-    if (!ids.length) return toast('ยังไม่ได้เลือกรายการ', true);
-    try {
-      for (const id of ids) {
-        const u = await DB.updateTx(id, { category: STOCK });
-        const i = state.tx.findIndex((x) => x.id === id);
-        if (i >= 0) state.tx[i] = u;
-      }
-      closeModal(); toast(`ย้าย ${ids.length} รายการแล้ว ✓`); render(true);
-    } catch (e) { toast('ย้ายไม่สำเร็จ: ' + (e.message || e), true); }
-  }
-
   /* ================= หน้าร้านข้าว ================= */
-  function blankForm(date) {
+  // % ตั้งต้นของวันใหม่ = % ของวันล่าสุดที่บันทึก (ถ้ายังไม่มี ใช้ค่าเดิม 50/15)
+  function formPcts() {
+    const last = state.shopDays.filter((e) => e.alloc && e.alloc.pcts && e.alloc.pcts.length >= 2).sort((a, b) => (a.date < b.date ? 1 : -1))[0];
+    return last ? [last.alloc.pcts[0], last.alloc.pcts[1]] : allocCfg().pcts;
+  }
+  function openNames() {
     const cfg = allocCfg();
+    openModal(`<h3>แก้ชื่อกอง</h3>
+      <div class="fields one">${[0, 1, 2].map((i) => `<label class="f">กองที่ ${i + 1}<input id="nmI${i}" value="${esc(cfg.names[i])}"></label>`).join('')}</div>
+      <p class="hint">ชื่อใหม่ใช้กับทุกหน้า ส่วน % ตั้งต้นของวันใหม่ คือ % ของวันล่าสุดที่บันทึกไว้</p>
+      <div class="actions"><button class="btn" data-act="modal-close">ยกเลิก</button><button class="btn primary" data-act="names-save">บันทึก</button></div>`);
+  }
+  function blankForm(date) {
+    const cfg = Object.assign({}, allocCfg(), { pcts: formPcts() });
     return { date, sales: '', cost: '', profit: '', note: '', rows: [{ mode: 'pct', pct: String(cfg.pcts[0]), amt: '' }, { mode: 'pct', pct: String(cfg.pcts[1]), amt: '' }, { mode: 'rest', pct: '', amt: '' }] };
   }
   function calcSplit(f) {
@@ -815,16 +798,13 @@
     const u = state.shopUI, cfg = allocCfg();
     if (!u.form) u.form = blankForm(today());
     const f = u.form, r = range(u.mode, u.anchor), sp = calcSplit(f);
-    const cap = Number(state.settings.capital) || 0;
     const cur = state.shopDays.filter((e) => e.date >= r.from && e.date <= r.to).sort((a, b) => (a.date < b.date ? 1 : -1));
     const sales = sumBy(cur, (e) => e.sales), cost = sumBy(cur, (e) => e.cost), profit = sumBy(cur, (e) => e.profit);
     const parts = [0, 1, 2].map((i) => sumBy(cur, (e) => entryAmounts(e)[i] || 0));
     const bks = buckets(u.mode, u.anchor);
     const idx = new Map(bks.map((b, i) => [b.key, i]));
-    const S = bks.map(() => 0), Co = bks.map(() => 0), Pr = bks.map(() => 0), Pu = bks.map(() => 0);
+    const S = bks.map(() => 0), Co = bks.map(() => 0), Pr = bks.map(() => 0);
     state.shopDays.forEach((e) => { const i = idx.get(keyOf(u.mode, e.date)); if (i != null) { S[i] += e.sales; Co[i] += e.cost; Pr[i] += e.profit; } });
-    const stockTx = state.tx.filter((t) => t.type === 'expense' && t.category === STOCK);
-    stockTx.forEach((t) => { const i = idx.get(keyOf(u.mode, t.date)); if (i != null) Pu[i] += t.amount; });
     const ps = potStats();
     const gw = u.mode === 'month' ? 34 : 44;
 
@@ -838,52 +818,27 @@
       tip: (i) => [bks[i].full, 'ขาย ' + money(S[i]), 'ต้นทุน ' + money(Co[i]), 'กำไร ' + money(Pr[i])] },
     (i) => `<b>${bks[i].full}</b><br>ขาย ${money(S[i])} · ต้นทุน ${money(Co[i])} · <span class="inc">กำไร ${money(Pr[i])}</span>`);
 
-    /* ทุนหมุนเวียน */
-    const days = Number(state.settings.capDays) || 7;
-    const t0 = today(), from30 = addDays(t0, -29);
-    const last30 = stockTx.filter((t) => t.date >= from30 && t.date <= t0);
-    const byDay = new Map();
-    last30.forEach((t) => byDay.set(t.date, (byDay.get(t.date) || 0) + t.amount));
-    const sum30 = sumBy(last30, (t) => t.amount), avg30 = sum30 / 30;
-    let peak = 0, peakDate = '';
-    byDay.forEach((val, k) => { if (val > peak) { peak = val; peakDate = k; } });
-    const have = cap + ps[1].bal, need = avg30 * days, diff = have - need;
-    const stockPeriod = sumBy(Pu, (x) => x);
-    const salesPerBaht = stockPeriod > 0 ? sales / stockPeriod : 0;
-    const chart3 = chartBlock('shop3', 'bars', { labels: bks.map((b) => b.label), minGroupW: gw, series: [{ name: 'ซื้อของเข้าร้าน', color: 'var(--pot1)', values: Pu }],
-      tip: (i) => [bks[i].full, 'ซื้อของ ' + money(Pu[i]), 'ขายได้ ' + money(S[i])] },
-    (i) => `<b>${bks[i].full}</b><br>ซื้อของเข้าร้าน ${money(Pu[i])} · ขายได้ ${money(S[i])}`);
-    const capHtml = avg30 > 0 ? `
-      <div class="kpis four">
-        <div class="kpi"><span>ทุนที่ใช้ต่อวัน</span><b>${money(avg30)}</b><small>เฉลี่ย 30 วันล่าสุด</small></div>
-        <div class="kpi"><span>วันที่ใช้สูงสุด</span><b>${money(peak)}</b><small>${peakDate ? fmtShort(peakDate) : ''}</small></div>
-        <div class="kpi"><span>ทุนที่ควรมี</span><b>${money(need)}</b><small>สำรอง ${days} วัน</small></div>
-        <div class="kpi ${diff >= 0 ? '' : 'warnk'}"><span>${diff >= 0 ? 'ทุนพอ' : 'ทุนขาด'}</span><b class="${diff >= 0 ? 'inc' : 'exp'}">${money(Math.abs(diff))}</b><small>มี ${money(have)} · ใช้ได้ ~${(have / avg30).toFixed(1)} วัน</small></div>
-      </div>
-      <div class="chips" style="margin:2px 0 12px"><span class="muted" style="align-self:center;font-size:13px">สำรองกี่วัน:</span>${[3, 7, 14, 30].map((n) => `<button class="chip ${days === n ? 'on' : ''}" data-act="cap-days" data-v="${n}">${n} วัน</button>`).join('')}</div>`
-      : `<div class="empty slim">ยังไม่มีรายการในหมวด “${STOCK}” ใน 30 วันล่าสุด<br>จดรายการซื้อของโดยเลือกหมวดนี้ หรือกดปุ่มด้านล่างเพื่อย้ายรายการเก่ามาเข้าหมวด</div>`;
-
     const rows = cur.map((e) => `<tr><td>${fmtShort(e.date)}</td><td>${money(e.sales)}</td><td>${money(e.cost)}</td><td class="${e.profit >= 0 ? 'inc' : 'exp'}">${money(e.profit)}</td>
       <td class="act"><button class="icon" data-act="shop-edit" data-date="${e.date}" aria-label="แก้ไข">${ICON.edit}</button> <button class="icon del" data-act="shop-del" data-id="${e.id}" aria-label="ลบ">${ICON.del}</button></td></tr>`).join('');
 
     const ledger = state.potOpen >= 0 ? potLedger(state.potOpen) : [];
 
     v.innerHTML = `
-      <div class="card c-shop" id="shopForm"><h2>🍚 จดยอดร้านข้าว</h2>
+      ${!u.formOpen ? `<div class="card c-shop" id="shopForm"><div class="pbar" style="margin:0"><h2>🍚 จดยอดร้านข้าว</h2><button class="btn sm primary" data-act="shop-form-toggle">+ จดยอด</button></div></div>` : `<div class="card c-shop" id="shopForm"><div class="pbar" style="margin-bottom:10px"><h2>🍚 จดยอดร้านข้าว</h2><button class="btn sm" data-act="shop-form-toggle">ปิด</button></div>
         <div class="fields">
           <div class="f"><span class="fl">วันที่</span>${dateField('sDate', f.date, 'data-input="shop-form" data-f="date"')}</div>
           <label class="f">ยอดขาย (บาท)<input id="sSales" class="money-in" inputmode="decimal" value="${esc(f.sales)}" data-input="shop-form" data-f="sales" placeholder="0"></label>
           <label class="f">ต้นทุน (บาท)<input id="sCost" class="money-in" inputmode="decimal" value="${esc(f.cost)}" data-input="shop-form" data-f="cost" placeholder="0"></label>
           <label class="f">กำไร (บาท)<input id="sProfit" class="money-in" inputmode="decimal" value="${esc(f.profit)}" data-input="shop-form" data-f="profit" placeholder="0"></label>
         </div>
-        <div class="splitlbl"><b>แบ่งกำไร</b><small class="muted">แก้ช่อง 1–2 ได้ทั้ง % และจำนวนเงิน ช่อง 3 คิดส่วนที่เหลือให้เอง</small></div>
+        <div class="splitlbl"><b>แบ่งกำไร</b><button type="button" class="linkbtn" data-act="names-open">แก้ชื่อกอง</button></div><p class="hint" style="margin:0 0 8px">แก้ช่อง 1–2 ได้ทั้ง % และจำนวนเงิน ช่อง 3 คิดส่วนที่เหลือให้เอง</p>
         <div class="split2">${[0, 1, 2].map((i) => `<div class="srow2"><div class="sn">${esc(cfg.names[i])}</div>
           <label class="inpp"><input id="spP${i}" inputmode="decimal" value="${showNum(sp.rows[i].pc)}" data-input="split" data-i="${i}" data-f="pct" ${i === 2 ? 'readonly tabindex="-1"' : ''}><span>%</span></label>
           <label class="inpa"><input id="spA${i}" inputmode="decimal" value="${showNum(sp.rows[i].a)}" data-input="split" data-i="${i}" data-f="amt" ${i === 2 ? 'readonly tabindex="-1"' : ''}><span>฿</span></label></div>`).join('')}</div>
         <div id="shopPrev">${shopPreviewHtml()}</div>
         <div class="fields one"><label class="f">หมายเหตุ (ไม่บังคับ)<input id="sNote" value="${esc(f.note)}" data-input="shop-form" data-f="note"></label></div>
         <button class="btn primary block" id="shopSaveBtn" data-act="shop-save">${existingShop(f.date) ? 'อัปเดต' : 'บันทึก'}ยอดวันที่ ${fmtD(f.date)}</button>
-      </div>
+      </div>`}
 
       <div class="card c-pot"><div class="pbar" style="margin-bottom:10px"><h2>เงินแต่ละกอง</h2><button class="btn sm primary" data-act="move-open" data-i="-1">+ เงินเข้า / ออก</button></div>
         <div class="pots">${[0, 1, 2].map((i) => `<button class="pot ${state.potOpen === i ? 'on' : ''}" data-act="pot-open" data-i="${i}" style="--pc:var(--pot${i})"><span class="pn">${esc(cfg.names[i])}</span><b class="${ps[i].bal < 0 ? 'exp' : ''}">${money(ps[i].bal)}</b><small>เข้า ${money(ps[i].in)}<br>ออก ${money(ps[i].out)}</small></button>`).join('')}</div>
@@ -893,34 +848,15 @@
           : '<div class="sidehint">ยังไม่มีรายการ</div>'}</div>` : ''}
       </div>
 
-      <div class="card c-cap"><div class="pbar" style="margin-bottom:6px"><h2>ทุนหมุนเวียน</h2><button class="btn sm" data-act="stock-open">จัดรายการซื้อของย้อนหลัง</button></div>
-        <p class="lead">ดึงจากรายการหมวด “${STOCK}” · ทุนที่มี = ทุนตั้งต้น ${money(cap)} + ${esc(cfg.names[1])} ${money(ps[1].bal)}</p>
-        ${capHtml}
-        ${stockPeriod > 0 ? `<div class="chartwrap">${chart3}</div><div class="avgs"><div><small>ซื้อของช่วงนี้</small><b>${money(stockPeriod)}</b></div><div><small>ขายได้ต่อทุน 1 บาท</small><b class="inc">${salesPerBaht ? '฿' + salesPerBaht.toFixed(2) : '–'}</b></div></div>` : ''}
-      </div>
+      ${capCardHtml(u)}
 
       ${periodBar('shop', u)}
-      <div class="kpis four">
-        <div class="kpi"><span>ยอดขาย</span><b>${money(sales)}</b><small>${cur.length} วันที่จด</small></div>
-        <div class="kpi"><span>ต้นทุน</span><b class="exp">${money(cost)}</b></div>
-        <div class="kpi accent"><span>กำไร</span><b>${money(profit)}</b><small>${sales > 0 ? pct(profit, sales) + '% ของยอดขาย' : ''}</small></div>
-        <div class="kpi"><span>ต้นทุนที่แท้จริง</span><b>${money(sales - profit)}</b><small>ยอดขาย − กำไร</small></div>
-      </div>
       <div class="card c-pot"><h2>การแบ่งกำไรช่วงนี้</h2>
         <div class="split">${[0, 1, 2].map((i) => `<div class="srow"><div>${esc(cfg.names[i])}</div><b>${money(parts[i])}</b></div>`).join('')}</div></div>
       <div class="card c-shop"><h2>ยอดขาย ต้นทุน กำไร</h2><p class="lead">${u.mode === 'day' ? '7 วันล่าสุด' : u.mode === 'year' ? 'รายเดือน' : 'รายวัน'}</p>
         <div class="chips" style="margin-bottom:10px">${active.map((s) => `<button class="chip ${u.series[s.key] ? 'on' : ''}" data-act="shop-ser" data-v="${s.key}">${s.name}</button>`).join('')}</div>
         ${chart1}</div>
-      <div class="card c-shop"><h2>รายวัน</h2>${cur.length ? `<div class="tblwrap"><table class="shoptbl"><thead><tr><th>วันที่</th><th>ยอดขาย</th><th>ต้นทุน</th><th>กำไร</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>` : '<div class="empty"><div class="big">🍚</div>ยังไม่มียอดในช่วงนี้</div>'}</div>
-
-      <details class="card c-set"><summary>⚙️ ตั้งค่าเริ่มต้นการแบ่งกำไรและทุน</summary>
-        <p class="lead">ค่าตั้งต้นของ % ตอนจดยอดใหม่ (วันไหนอยากเปลี่ยน แก้ในฟอร์มด้านบนได้เลย) ส่วนที่ 3 คือส่วนที่เหลือ</p>
-        ${[0, 1, 2].map((i) => `<div class="fields" style="grid-template-columns:1fr 110px">
-          <label class="f">ชื่อส่วนที่ ${i + 1}<input id="aName${i}" value="${esc(cfg.names[i])}"></label>
-          <label class="f">เปอร์เซ็นต์<input id="aPct${i}" inputmode="decimal" value="${i < 2 ? cfg.pcts[i] : round2(100 - cfg.pcts[0] - cfg.pcts[1])}" ${i === 2 ? 'readonly' : 'data-input="alloc-form"'}></label></div>`).join('')}
-        <div class="fields one"><label class="f">ทุนหมุนเวียนตั้งต้น (บาท)<input id="aCap" class="money-in" inputmode="decimal" value="${cap || ''}" placeholder="0"></label></div>
-        <button class="btn primary block" data-act="alloc-save">บันทึกการตั้งค่า</button>
-      </details>`;
+      <div class="card c-shop"><h2>รายวัน</h2>${cur.length ? `<div class="tblwrap"><table class="shoptbl"><thead><tr><th>วันที่</th><th>ยอดขาย</th><th>ต้นทุน</th><th>กำไร</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>` : '<div class="empty"><div class="big">🍚</div>ยังไม่มียอดในช่วงนี้</div>'}</div>`;
   }
   async function saveShop(btn) {
     const f = state.shopUI.form;
@@ -936,7 +872,7 @@
       const i = state.shopDays.findIndex((e) => e.date === saved.date);
       if (i >= 0) state.shopDays[i] = saved; else state.shopDays.push(saved);
       toast('บันทึกยอดร้านข้าวแล้ว ✓');
-      state.shopUI.anchor = f.date; state.sel.shop1 = undefined; state.sel.shop3 = undefined;
+      state.shopUI.anchor = f.date; state.shopUI.formOpen = false; state.sel.shop1 = undefined; state.sel.shop3 = undefined;
       loadShopDate(addDays(f.date, 1) > today() ? today() : addDays(f.date, 1));
       render(true);
     } catch (e) { toast('บันทึกไม่สำเร็จ: ' + (e.message || e), true); }
@@ -1143,7 +1079,7 @@
       case 'use-stock': state.shopUI.form.cost = String(num(v)); fillShopForm(); break;
       case 'shop-save': saveShop(el); break;
       case 'shop-ser': state.shopUI.series[v] = !state.shopUI.series[v]; if (!Object.values(state.shopUI.series).some(Boolean)) state.shopUI.series[v] = true; render(true); break;
-      case 'shop-edit': loadShopDate(el.dataset.date); fillShopForm(); { const sf = $('#shopForm'); if (sf) sf.scrollIntoView({ behavior: 'smooth', block: 'start' }); } break;
+      case 'shop-edit': state.shopUI.formOpen = true; loadShopDate(el.dataset.date); render(true); { const sf = $('#shopForm'); if (sf) sf.scrollIntoView({ behavior: 'smooth', block: 'start' }); } break;
       case 'shop-del': {
         const en = state.shopDays.find((x) => x.id === el.dataset.id);
         if (en && confirm(`ลบยอดวันที่ ${fmtD(en.date)} ?`)) DB.deleteShop(en.id).then(() => { state.shopDays = state.shopDays.filter((x) => x.id !== en.id); toast('ลบแล้ว'); render(true); }).catch((er) => toast('ลบไม่สำเร็จ: ' + (er.message || er), true));
@@ -1157,19 +1093,14 @@
       case 'auto-save': saveAutoAmount(state.autoEdit.date, state.autoEdit.i, num($('#aeAmt').value)); break;
       case 'auto-del': if (confirm(`ตั้งยอดที่แบ่งเข้ากองนี้ของวันที่ ${fmtD(el.dataset.date)} เป็น ฿0 ?\n(ยอดขายและกำไรของวันยังอยู่ แก้กลับได้ภายหลัง)`)) saveAutoAmount(el.dataset.date, i, 0); break;
       case 'move-del': if (confirm('ลบรายการเงินเข้า/ออกนี้?')) DB.deleteMove(el.dataset.id).then(() => { state.moves = state.moves.filter((m) => m.id !== el.dataset.id); render(true); }).catch((er) => toast('ลบไม่สำเร็จ: ' + (er.message || er), true)); break;
-      case 'stock-open': openStockTool(); break;
-      case 'stock-move': moveStock(); break;
-      case 'cap-days': state.settings.capDays = Number(v); saveSetting('capDays'); render(true); break;
-      case 'alloc-save': {
-        const names = [0, 1, 2].map((n) => $('#aName' + n).value.trim() || DEF_ALLOC.names[n]);
-        const p0 = num($('#aPct0').value), p1 = num($('#aPct1').value);
-        if (p0 < 0 || p1 < 0 || p0 + p1 > 100) return toast('เปอร์เซ็นต์ส่วนที่ 1 + 2 ต้องไม่เกิน 100', true);
-        state.settings.alloc = { names, pcts: [p0, p1] };
-        state.settings.capital = Math.max(0, num($('#aCap').value));
-        state.shopUI.form = null;
-        saveSetting('alloc'); saveSetting('capital'); toast('บันทึกการตั้งค่าแล้ว ✓'); render(true);
+      case 'names-open': openNames(); break;
+      case 'names-save': {
+        const names = [0, 1, 2].map((n) => $('#nmI' + n).value.trim() || DEF_ALLOC.names[n]);
+        state.settings.alloc = { names, pcts: allocCfg().pcts };
+        saveSetting('alloc'); closeModal(); toast('บันทึกชื่อกองแล้ว ✓'); render(true);
         break;
       }
+      case 'shop-form-toggle': state.shopUI.formOpen = !state.shopUI.formOpen; render(true); if (state.shopUI.formOpen) { const sf = $('#shopForm'); if (sf) sf.scrollIntoView({ behavior: 'smooth', block: 'start' }); } break;
       case 'acc': state.open[v] = !state.open[v]; render(true); break;
       case 'cat-open': state.catOpen = state.catOpen === v ? null : v; render(true); break;
       case 'theme-group': state.themeGroup = v; render(true); break;
@@ -1209,7 +1140,7 @@
         if (confirm(`ลบข้อมูล ${n} รายการที่จดไว้ในเครื่องนี้ทิ้ง โดยไม่ย้ายขึ้น Supabase ?\n(ลบแล้วเอากลับคืนไม่ได้)`)) { DB.clearLocal(); toast('ลบข้อมูลในเครื่องนี้แล้ว'); render(true); }
         break;
       }
-      case 'pot-view': state.dash.potView = v; render(true); break;
+      case 'pot-view': state.potView = v; render(true); break;
       case 'd-open': {
         if (Date.now() - (state.swipedAt || 0) < 500) break;
         const inp = $('#' + el.dataset.t);
@@ -1260,11 +1191,6 @@
       if (idx === 2 && el.value.trim() === '') row.mode = 'rest'; // ล้างช่องส่วนที่ 3 = กลับไปคิดส่วนที่เหลือให้เอง
       else if (el.dataset.f === 'pct') { row.mode = 'pct'; row.pct = el.value; } else { row.mode = 'amt'; row.amt = el.value; }
       updateShopForm();
-    } else if (kind === 'alloc-form') {
-      $('#aPct2').value = round2(100 - num($('#aPct0').value) - num($('#aPct1').value));
-    } else if (kind === 'stock-pick') {
-      if (el.checked) state.stockPick.add(el.dataset.id); else state.stockPick.delete(el.dataset.id);
-      $('#stockBtn').textContent = `ย้ายเข้าหมวด (${state.stockPick.size})`;
     }
   });
 
